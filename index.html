@@ -3,685 +3,629 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>高性能虚拟滚动列表 - 生产级演示</title>
+  <title>生产级虚拟滚动 - 选择/折叠/固定锚定/对齐</title>
   <script src="./virtual-list.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #f0f2f5;
-      padding: 20px;
-      color: #333;
-    }
-    .page { max-width: 1400px; margin: 0 auto; }
-    h1 { text-align: center; margin-bottom: 6px; font-size: 24px; }
-    .subtitle { text-align: center; color: #888; font-size: 13px; margin-bottom: 20px; }
-
-    .tabs {
-      display: flex; gap: 8px; margin-bottom: 16px; justify-content: center; flex-wrap: wrap;
-    }
-    .tab-btn {
-      padding: 10px 18px; border: 2px solid #4a6cf7; background: white; color: #4a6cf7;
-      border-radius: 10px; cursor: pointer; font-size: 14px; transition: all 0.2s; font-weight: 500;
-    }
-    .tab-btn.active { background: #4a6cf7; color: white; box-shadow: 0 2px 10px rgba(74,108,247,0.3); }
+    body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; background: #f1f5f9; padding: 16px; color: #1e293b; }
+    .page { max-width: 1440px; margin: 0 auto; }
+    h1 { font-size: 22px; text-align: center; margin-bottom: 4px; }
+    .subtitle { text-align: center; color: #64748b; font-size: 13px; margin-bottom: 16px; }
+    .tabs { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; margin-bottom: 14px; }
+    .tab-btn { padding: 9px 16px; border: 2px solid #6366f1; background: white; color: #6366f1; border-radius: 9px; cursor: pointer; font-size: 13px; font-weight: 500; transition: all .15s; }
+    .tab-btn.active { background: #6366f1; color: white; box-shadow: 0 3px 12px rgba(99,102,241,0.3); }
     .tab-btn:hover:not(.active) { background: #eef2ff; }
-
-    .panel {
-      display: none;
-      background: white;
-      border-radius: 14px;
-      padding: 18px;
-      box-shadow: 0 2px 16px rgba(0,0,0,0.06);
-    }
+    .panel { display: none; background: white; border-radius: 14px; padding: 14px; box-shadow: 0 2px 14px rgba(15,23,42,0.05); }
     .panel.active { display: block; }
-
-    .toolbar {
-      display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center;
-    }
-    .toolbar .sep { width: 1px; height: 24px; background: #e5e5e5; margin: 0 4px; }
-    .btn {
-      padding: 7px 14px; background: #4a6cf7; color: white; border: none; border-radius: 7px;
-      cursor: pointer; font-size: 13px; transition: background 0.15s;
-    }
-    .btn:hover { background: #3a57d4; }
-    .btn.secondary { background: #f2f3f7; color: #333; }
-    .btn.secondary:hover { background: #e4e6ee; }
+    .toolbar { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; align-items: center; }
+    .toolbar .sep { width: 1px; height: 22px; background: #e2e8f0; margin: 0 4px; }
+    .btn { padding: 7px 13px; background: #6366f1; color: white; border: 0; border-radius: 7px; cursor: pointer; font-size: 13px; transition: background .15s; }
+    .btn:hover { background: #4f46e5; }
+    .btn.secondary { background: #f1f5f9; color: #334155; }
+    .btn.secondary:hover { background: #e2e8f0; }
     .btn.danger { background: #ef4444; }
-    .btn.danger:hover { background: #dc2626; }
-    .btn:disabled { background: #c9cfdb; cursor: not-allowed; }
-    input[type="text"], input[type="number"] {
-      padding: 7px 10px; border: 1px solid #d5d8e0; border-radius: 7px; font-size: 13px; width: 120px;
-    }
-    select {
-      padding: 7px 10px; border: 1px solid #d5d8e0; border-radius: 7px; font-size: 13px;
-      background: white;
-    }
+    .btn.success { background: #10b981; }
+    .btn:disabled { background: #cbd5e1; cursor: not-allowed; }
+    input[type="text"], input[type="number"], select { padding: 7px 10px; border: 1px solid #cbd5e1; border-radius: 7px; font-size: 13px; background: white; }
+    .stats { display: flex; gap: 16px; margin-bottom: 10px; padding: 9px 12px; background: #eef2ff; border-radius: 8px; font-size: 13px; flex-wrap: wrap; }
+    .stat b { color: #4338ca; margin-left: 4px; }
+    .stats.sel { background: #fef3c7; }
+    .stats.sel b { color: #b45309; }
+    .list-wrap { height: 500px; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; background: white; }
+    .list-wrap:focus-within { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.2); }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    @media (max-width: 960px) { .grid-2 { grid-template-columns: 1fr; } }
+    .side { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; max-height: 640px; overflow-y: auto; }
+    .side h3 { font-size: 13px; margin-bottom: 8px; color: #334155; display: flex; align-items: center; gap: 6px; }
+    .side h3 .count { font-weight: 400; color: #64748b; font-size: 11px; background: #e2e8f0; padding: 1px 7px; border-radius: 10px; }
+    .side ul { list-style: none; }
+    .side li { padding: 6px 9px; border-radius: 6px; font-size: 12px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; }
+    .side li:hover { background: #eef2ff; }
+    .side li.active { background: #6366f1; color: white; }
+    .side li .c { color: #94a3b8; font-size: 11px; }
+    .side li.active .c { color: rgba(255,255,255,0.75); }
+    .output { margin-top: 10px; padding: 9px 12px; background: #0f172a; color: #a7f3d0; border-radius: 8px; font-family: Consolas, monospace; font-size: 12px; max-height: 120px; overflow-y: auto; }
+    .output .t { color: #60a5fa; margin-right: 6px; }
+    .output .tag { color: #fbbf24; margin-right: 6px; }
 
-    .stats {
-      display: flex; gap: 18px; margin-bottom: 12px; padding: 10px 14px; background: #f7f9ff;
-      border-radius: 8px; font-size: 13px; flex-wrap: wrap;
-    }
-    .stat b { color: #4a6cf7; margin-left: 4px; }
-
-    .list-wrapper {
-      height: 520px; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden;
-      background: white;
-    }
-
-    /* 列表项样式 */
+    /* ===== 列表项样式 ===== */
     .vl-item {
-      padding: 12px 16px;
-      border-bottom: 1px solid #f0f1f5;
-      background: white;
-      display: flex; gap: 12px; align-items: flex-start;
+      padding: 10px 14px; border-bottom: 1px solid #f1f5f9; background: white;
+      display: flex; gap: 10px; align-items: flex-start; transition: background .12s, box-shadow .12s;
     }
     .vl-item:hover { background: #fafbff; }
-    .vl-avatar {
-      width: 40px; height: 40px; border-radius: 50%;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      display: flex; align-items: center; justify-content: center;
-      color: white; font-weight: 600; font-size: 15px; flex-shrink: 0;
-    }
-    .vl-avatar.avatar-2 { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
-    .vl-avatar.avatar-3 { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
-    .vl-avatar.avatar-4 { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }
+    .vl-item[data-selected="true"] { background: #eef2ff; }
+    .vl-item[data-selected="true"] .vl-title { color: #3730a3; }
+    .vl-item[data-focused="true"] { box-shadow: inset 3px 0 0 #6366f1; }
+    .vl-item .vl-check { width: 16px; height: 16px; flex-shrink: 0; margin-top: 3px; border: 2px solid #cbd5e1; border-radius: 4px; background: white; display: flex; align-items: center; justify-content: center; font-size: 11px; color: white; line-height: 1; }
+    .vl-item[data-selected="true"] .vl-check { background: #6366f1; border-color: #6366f1; }
+    .vl-item[data-selected="true"] .vl-check::after { content: '✓'; }
+    .vl-avatar { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg,#6366f1,#8b5cf6); color: white; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 14px; flex-shrink: 0; }
+    .vl-avatar.a2 { background: linear-gradient(135deg,#ec4899,#f43f5e); }
+    .vl-avatar.a3 { background: linear-gradient(135deg,#10b981,#06b6d4); }
+    .vl-avatar.a4 { background: linear-gradient(135deg,#f59e0b,#ef4444); }
     .vl-body { flex: 1; min-width: 0; }
-    .vl-title { font-size: 14px; font-weight: 500; margin-bottom: 3px; }
-    .vl-title .idx-tag {
-      display: inline-block; background: #eef2ff; color: #4a6cf7; padding: 1px 7px;
-      border-radius: 4px; font-size: 11px; margin-right: 6px; font-weight: 600;
-    }
-    .vl-desc { font-size: 12px; color: #777; line-height: 1.5; }
-    .vl-item.highlight { background: #fffbeb; }
-    .vl-item.highlight .vl-title { color: #b45309; }
-
-    /* 长文本/动态高度用 */
-    .vl-desc.long { white-space: normal; }
-    .vl-desc img { max-width: 100%; margin-top: 6px; border-radius: 6px; display: block; }
+    .vl-title { font-size: 13px; font-weight: 500; margin-bottom: 2px; }
+    .vl-title .tag { display: inline-block; background: #ede9fe; color: #5b21b6; padding: 1px 6px; border-radius: 4px; font-size: 11px; margin-right: 6px; font-weight: 600; }
+    .vl-desc { font-size: 12px; color: #64748b; line-height: 1.5; }
+    .vl-desc img { max-width: 260px; margin-top: 5px; border-radius: 5px; display: block; }
 
     /* 分组标题 */
     .vl-group {
-      padding: 10px 16px;
-      background: linear-gradient(90deg, #4a6cf7 0%, #6b86ff 100%);
-      color: white; font-weight: 600; font-size: 13px;
-      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 14px; background: linear-gradient(90deg,#6366f1,#8b5cf6); color: white;
+      font-weight: 600; font-size: 12px; display: flex; align-items: center; justify-content: space-between;
     }
+    .vl-group .left { display: flex; align-items: center; gap: 8px; }
+    .vl-group .caret { transition: transform .2s; display: inline-block; width: 14px; text-align: center; }
+    .vl-group.collapsed .caret { transform: rotate(-90deg); }
+    .vl-group .num { background: rgba(255,255,255,0.25); padding: 1px 8px; border-radius: 10px; font-size: 11px; }
     .vl-sticky {
-      padding: 10px 16px;
-      background: linear-gradient(90deg, #4a6cf7 0%, #6b86ff 100%);
-      color: white; font-weight: 600; font-size: 13px; width: 100%;
-      display: flex; align-items: center; justify-content: space-between;
-      box-shadow: 0 2px 10px rgba(74,108,247,0.3);
+      padding: 8px 14px; background: linear-gradient(90deg,#6366f1,#8b5cf6); color: white;
+      font-weight: 600; font-size: 12px; width: 100%; display: flex; align-items: center; justify-content: space-between;
+      box-shadow: 0 3px 10px rgba(99,102,241,0.35);
     }
-    .vl-group .count, .vl-sticky .count {
-      background: rgba(255,255,255,0.25); padding: 2px 8px; border-radius: 10px; font-size: 11px;
-    }
-
-    /* 信息输出区 */
-    .output {
-      margin-top: 12px; padding: 10px 14px; background: #0f172a; color: #a7f3d0;
-      border-radius: 8px; font-family: 'Consolas', monospace; font-size: 12px;
-      max-height: 120px; overflow-y: auto;
-    }
-    .output .ts { color: #60a5fa; margin-right: 6px; }
-    .output .tag { color: #fbbf24; margin-right: 6px; }
-
-    .grid-2 {
-      display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
-    }
-    @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
-
-    .side-panel {
-      background: #fafbff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px;
-      max-height: 660px; overflow-y: auto;
-    }
-    .side-panel h3 { font-size: 14px; margin-bottom: 8px; color: #334155; }
-    .side-panel ul { list-style: none; }
-    .side-panel li {
-      padding: 7px 10px; border-radius: 6px; font-size: 13px; cursor: pointer;
-      display: flex; align-items: center; justify-content: space-between;
-    }
-    .side-panel li:hover { background: #eef2ff; }
-    .side-panel li.active { background: #4a6cf7; color: white; }
-    .side-panel li .c { color: #94a3b8; font-size: 11px; }
-    .side-panel li.active .c { color: rgba(255,255,255,0.7); }
+    .vl-sticky .left { display: flex; align-items: center; gap: 8px; }
+    .vl-sticky .caret { transition: transform .2s; display: inline-block; width: 14px; text-align: center; }
+    .vl-sticky.collapsed .caret { transform: rotate(-90deg); }
+    .vl-sticky .num { background: rgba(255,255,255,0.25); padding: 1px 8px; border-radius: 10px; font-size: 11px; }
   </style>
 </head>
 <body>
 <div class="page">
-  <h1>🚀 高性能虚拟滚动列表 - 生产级演示</h1>
-  <div class="subtitle">支持 key 保持位置 · 动态行高(ResizeObserver+图片) · 分组吸附合并 · 滚动控制API</div>
+  <h1>🏭 生产级虚拟滚动列表 v2</h1>
+  <div class="subtitle">选择/焦点 + 折叠分组 + 固定行高锚定 + 动态行高对齐（全按 key 保持状态）</div>
 
   <div class="tabs">
-    <button class="tab-btn active" data-tab="tab-anchor">① 按 Key 保持滚动位置</button>
-    <button class="tab-btn" data-tab="tab-dynamic">② 动态行高稳定性</button>
-    <button class="tab-btn" data-tab="tab-control">③ 滚动控制 API</button>
-    <button class="tab-btn" data-tab="tab-group">④ 分组吸附 + 合并追加</button>
+    <button class="tab-btn active" data-tab="t1">① 多选 + 键盘焦点</button>
+    <button class="tab-btn" data-tab="t2">② 分组折叠展开</button>
+    <button class="tab-btn" data-tab="t3">③ 固定行高 位置保持</button>
+    <button class="tab-btn" data-tab="t4">④ 动态行高 + 精确曝光</button>
   </div>
 
-  <!-- ① 按 Key 保持滚动位置 -->
-  <div id="tab-anchor" class="panel active">
+  <!-- ① 多选 + 键盘焦点 -->
+  <div id="t1" class="panel active">
     <div class="toolbar">
-      <button class="btn" onclick="anchorDemo.prependData()">在前面插入 50 条</button>
-      <button class="btn" onclick="anchorDemo.appendData()">在后面追加 50 条</button>
-      <button class="btn secondary" onclick="anchorDemo.shuffleAndReload()">随机打乱并重载</button>
-      <button class="btn danger" onclick="anchorDemo.refresh()">调用 refresh()</button>
+      <select id="sel-mode">
+        <option value="multiple">多选模式</option>
+        <option value="single">单选模式</option>
+        <option value="none">无选择</option>
+      </select>
+      <button class="btn success" onclick="selDemo.selectAll()">全选</button>
+      <button class="btn secondary" onclick="selDemo.clearSel()">清空选择</button>
       <div class="sep"></div>
-      <button class="btn secondary" onclick="anchorDemo.jumpMiddle()">跳到第 500 条锚定</button>
+      <button class="btn" onclick="selDemo.prepend50()">前面插 50 条</button>
+      <button class="btn" onclick="selDemo.append50()">后面加 50 条</button>
+      <button class="btn secondary" onclick="selDemo.shuffle()">打乱顺序</button>
+      <div class="sep"></div>
+      <button class="btn secondary" onclick="selDemo.focusFirst()">设焦点第1条</button>
+      <span style="font-size:12px;color:#64748b;">提示:点击列表获得焦点,用 ↑↓ 移动,空格/回车选中,Shift 范围选,Ctrl 多选</span>
+    </div>
+    <div class="stats sel">
+      <div class="stat">选中数量:<b id="sel-count">0</b></div>
+      <div class="stat">选中ID:<b id="sel-ids">-</b></div>
+      <div class="stat">当前焦点:<b id="sel-focus">-</b></div>
     </div>
     <div class="stats">
-      <div class="stat">当前总条数:<b id="anchor-stat-total">0</b></div>
-      <div class="stat">渲染的 DOM 数:<b id="anchor-stat-rendered">0</b></div>
-      <div class="stat">锚定 Item Key:<b id="anchor-stat-key">-</b></div>
+      <div class="stat">总条数:<b id="sel-total">0</b></div>
+      <div class="stat">渲染DOM:<b id="sel-dom">0</b></div>
     </div>
-    <div class="list-wrapper" id="anchor-list"></div>
-    <div class="output" id="anchor-output"></div>
+    <div class="list-wrap" id="sel-list"></div>
+    <div class="output" id="sel-output"></div>
   </div>
 
-  <!-- ② 动态行高稳定性 -->
-  <div id="tab-dynamic" class="panel">
-    <div class="toolbar">
-      <button class="btn" onclick="dynamicDemo.toggleImages()">切换图片显隐</button>
-      <button class="btn" onclick="dynamicDemo.addLongText()">追加含长文本的数据</button>
-      <button class="btn secondary" onclick="dynamicDemo.refresh()">重新测量高度</button>
-      <div class="sep"></div>
-      <span style="font-size:12px;color:#666;">提示：滚动查看项重叠/底部空白是否出现</span>
-    </div>
-    <div class="stats">
-      <div class="stat">总条数:<b id="dynamic-stat-total">0</b></div>
-      <div class="stat">预估总高:<b id="dynamic-stat-estimated">0</b>px</div>
-      <div class="stat">实际总高:<b id="dynamic-stat-real">0</b>px</div>
-      <div class="stat">已测量项:<b id="dynamic-stat-measured">0</b></div>
-    </div>
-    <div class="list-wrapper" id="dynamic-list"></div>
-  </div>
-
-  <!-- ③ 滚动控制 API -->
-  <div id="tab-control" class="panel">
+  <!-- ② 分组折叠展开 -->
+  <div id="t2" class="panel">
     <div class="grid-2">
       <div>
         <div class="toolbar">
-          <input type="number" id="ctrl-item-input" placeholder="Item ID (0-9999)" min="0" max="9999">
-          <select id="ctrl-align">
-            <option value="start">对齐顶部</option>
-            <option value="center">居中</option>
-            <option value="end">对齐底部</option>
-          </select>
-          <button class="btn" onclick="controlDemo.scrollToItem()">scrollToItem</button>
+          <button class="btn" onclick="grpDemo.appendNewG()">追加新分组</button>
+          <button class="btn secondary" onclick="grpDemo.appendToG1()">追加到「G-1」</button>
+          <button class="btn" onclick="grpDemo.appendMixed()">混合追加</button>
+          <div class="sep"></div>
+          <button class="btn secondary" onclick="grpDemo.collapseAll()">全部折叠</button>
+          <button class="btn secondary" onclick="grpDemo.expandAll()">全部展开</button>
         </div>
         <div class="stats">
-          <div class="stat">可见起始ID:<b id="ctrl-stat-start">-</b></div>
-          <div class="stat">可见结束ID:<b id="ctrl-stat-end">-</b></div>
-          <div class="stat">可见条数:<b id="ctrl-stat-count">0</b></div>
+          <div class="stat">分组数:<b id="grp-groups">0</b></div>
+          <div class="stat">总条数:<b id="grp-items">0</b></div>
+          <div class="stat">折叠中:<b id="grp-collapsed">0</b>组</div>
+          <div class="stat">吸顶分组:<b id="grp-sticky">-</b></div>
         </div>
-        <div class="list-wrapper" id="control-list"></div>
+        <div class="list-wrap" id="grp-list"></div>
       </div>
-      <div class="side-panel">
-        <h3>📋 实时可见范围 (onVisibleRangeChange)</h3>
-        <ul id="ctrl-visible-list"></ul>
-      </div>
-    </div>
-  </div>
-
-  <!-- ④ 分组吸附 + 合并追加 -->
-  <div id="tab-group" class="panel">
-    <div class="grid-2">
-      <div>
-        <div class="toolbar">
-          <button class="btn" onclick="groupDemo.appendNewGroup()">追加新分组</button>
-          <button class="btn secondary" onclick="groupDemo.appendToExistingGroup()">追加到「已有分组 G-1」</button>
-          <button class="btn" onclick="groupDemo.appendMixed()">混合追加(含新+已有)</button>
-        </div>
-        <div class="stats">
-          <div class="stat">分组数:<b id="group-stat-groups">0</b></div>
-          <div class="stat">总条数:<b id="group-stat-items">0</b></div>
-          <div class="stat">当前吸顶分组:<b id="group-stat-sticky">-</b></div>
-        </div>
-        <div class="list-wrapper" id="group-list"></div>
-      </div>
-      <div class="side-panel">
-        <h3>📂 目录 (点击跳转到分组)</h3>
-        <ul id="group-catalog"></ul>
+      <div class="side">
+        <h3>📂 目录(点击跳转) <span class="count" id="grp-cat-count">0</span></h3>
+        <ul id="grp-catalog"></ul>
         <h3 style="margin-top:14px;">📊 事件日志</h3>
-        <div class="output" id="group-output" style="max-height:180px;"></div>
+        <div class="output" id="grp-output" style="max-height:180px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ③ 固定行高 位置保持 -->
+  <div id="t3" class="panel">
+    <div class="toolbar">
+      <button class="btn" onclick="fixDemo.prepend()">前面插 100 条</button>
+      <button class="btn" onclick="fixDemo.append()">后面加 100 条</button>
+      <button class="btn secondary" onclick="fixDemo.reload()">完全重载新数据</button>
+      <button class="btn danger" onclick="fixDemo.refresh()">refresh()</button>
+      <div class="sep"></div>
+      <span style="font-size:12px;color:#64748b;">验证:操作后当前视口内容不跳走</span>
+    </div>
+    <div class="stats">
+      <div class="stat">总条数:<b id="fix-total">0</b></div>
+      <div class="stat">渲染DOM:<b id="fix-dom">0</b></div>
+      <div class="stat">当前scrollTop:<b id="fix-st">0</b></div>
+      <div class="stat">锚点key:<b id="fix-anchor">-</b></div>
+    </div>
+    <div class="list-wrap" id="fix-list"></div>
+    <div class="output" id="fix-output"></div>
+  </div>
+
+  <!-- ④ 动态行高 + 精确曝光 -->
+  <div id="t4" class="panel">
+    <div class="toolbar">
+      <button class="btn" onclick="dynDemo.toggleImgs()">切换图片</button>
+      <button class="btn secondary" onclick="dynDemo.addLong()">追加长文本</button>
+      <button class="btn" onclick="dynDemo.forceTop()">回到顶部</button>
+      <div class="sep"></div>
+      <span style="font-size:12px;color:#64748b;">验证:撑高后不跳+曝光从真正第一条开始</span>
+    </div>
+    <div class="stats">
+      <div class="stat">预估总高:<b id="dyn-est">0</b>px</div>
+      <div class="stat">实际总高:<b id="dyn-real">0</b>px</div>
+      <div class="stat">已测量:<b id="dyn-measured">0</b></div>
+    </div>
+    <div class="grid-2">
+      <div class="list-wrap" id="dyn-list"></div>
+      <div class="side">
+        <h3>🎯 实时曝光统计 <span class="count" id="dyn-count">0条</span></h3>
+        <ul id="dyn-exposure"></ul>
+        <h3 style="margin-top:14px;">📝 曝光日志(前3条真正入视口的ID)</h3>
+        <div class="output" id="dyn-output" style="max-height:200px;"></div>
       </div>
     </div>
   </div>
 </div>
 
 <script>
-/* ---------- 通用工具 ---------- */
-function logOutput(elId, tag, msg) {
-  const el = document.getElementById(elId);
-  if (!el) return;
-  const now = new Date();
-  const ts = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}.${now.getMilliseconds().toString().padStart(3,'0')}`;
+/* ===== 工具 ===== */
+function log(outId, tag, msg) {
+  const el = document.getElementById(outId); if (!el) return;
+  const d = new Date();
+  const ts = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}.${String(d.getMilliseconds()).padStart(3,'0')}`;
   const div = document.createElement('div');
-  div.innerHTML = `<span class="ts">[${ts}]</span><span class="tag">[${tag}]</span>${msg}`;
-  el.appendChild(div);
-  el.scrollTop = el.scrollHeight;
-  while (el.childNodes.length > 50) el.removeChild(el.firstChild);
+  div.innerHTML = `<span class="t">[${ts}]</span><span class="tag">[${tag}]</span>${msg}`;
+  el.appendChild(div); el.scrollTop = el.scrollHeight;
+  while (el.childNodes.length > 60) el.removeChild(el.firstChild);
 }
-let ID_SEED = 0;
-function nextId(prefix) { return `${prefix}-${++ID_SEED}`; }
-
-document.querySelectorAll('.tab-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById(btn.dataset.tab).classList.add('active');
-  });
+document.querySelectorAll('.tab-btn').forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll('.tab-btn').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    document.getElementById(b.dataset.tab).classList.add('active');
+  };
 });
-
-/* ---------- 通用:渲染列表项 ---------- */
-function avatarFor(id) {
-  const palette = ['', 'avatar-2', 'avatar-3', 'avatar-4'];
-  const ch = String.fromCharCode(65 + (parseInt(id) % 26));
-  const cls = palette[parseInt(id) % palette.length];
-  return `<div class="vl-avatar ${cls}">${ch}</div>`;
+function av(n) {
+  const arr = ['', 'a2','a3','a4'];
+  return arr[parseInt(n) % arr.length];
 }
-function renderSimpleItem({ item, index, key }, highlightId) {
-  const div = document.createElement('div');
-  div.className = 'vl-item' + (highlightId != null && item.id === highlightId ? ' highlight' : '');
-  div.innerHTML = `
-    ${avatarFor(item.id)}
-    <div class="vl-body">
-      <div class="vl-title"><span class="idx-tag">${index != null ? index : ''}</span>${item.title}</div>
-      <div class="vl-desc">id=${item.id} · ${item.desc}</div>
-    </div>
-  `;
-  return div;
-}
+function ach(n) { return String.fromCharCode(65 + (parseInt(n) % 26)); }
 
-/* ==========================================================
- * ① 按 Key 保持滚动位置 Demo
- * ========================================================== */
-const anchorDemo = (() => {
+/* ============================================================
+ * ① 多选 + 键盘焦点
+ * ============================================================ */
+const selDemo = (() => {
   let list;
   let data = [];
-  let anchoredKey = null;
-
-  function gen(n, startId = 0) {
-    const arr = [];
+  let seed = 100000;
+  function gen(n, startId=0) {
+    const a = [];
     for (let i = 0; i < n; i++) {
       const id = startId + i;
-      arr.push({ id, title: `数据项 #${id}`, desc: `这是第 ${id} 项,用于验证按 key 保持滚动位置。` });
+      a.push({ id, title: `用户资料 #${id}`, desc: `所属部门 ${(id%20)+1},工号 U${String(id).padStart(6,'0')}` });
     }
-    return arr;
+    return a;
   }
-
-  function init() {
-    data = gen(5000, 1000);
-    const container = document.getElementById('anchor-list');
-    list = new VirtualList(container, {
-      itemHeight: 64,
-      buffer: 8,
-      getItemKey: item => item.id,
-      renderItem: (ctx, i) => renderSimpleItem(ctx, anchoredKey),
-      onVisibleRangeChange: (r) => {
-        document.getElementById('anchor-stat-rendered').textContent = (r.endIndex - r.startIndex);
+  function render(ctx) {
+    const { item, key, selected, focused, index } = ctx;
+    const div = document.createElement('div');
+    div.className = 'vl-item';
+    div.innerHTML = `
+      <div class="vl-check"></div>
+      <div class="vl-avatar ${av(item.id)}">${ach(item.id)}</div>
+      <div class="vl-body">
+        <div class="vl-title"><span class="tag">#${index != null ? index : ''}</span>${item.title}</div>
+        <div class="vl-desc">id=${item.id} · ${item.desc}</div>
+      </div>`;
+    return div;
+  }
+  function mode() { return document.getElementById('sel-mode').value; }
+  function rebuild() {
+    const c = document.getElementById('sel-list');
+    c.innerHTML = '';
+    list = new VirtualList(c, {
+      itemHeight: 60,
+      buffer: 6,
+      selectionMode: mode(),
+      getItemKey: it => it.id,
+      renderItem: render,
+      onVisibleRangeChange: r => {
+        document.getElementById('sel-dom').textContent = (r.endIndex - r.startIndex);
+      },
+      onSelectionChange: (keys, items) => {
+        document.getElementById('sel-count').textContent = keys.size;
+        const arr = [...keys];
+        document.getElementById('sel-ids').textContent = arr.length === 0 ? '-' :
+          arr.length <= 5 ? arr.join(', ') : `${arr.slice(0,5).join(', ')}...+${arr.length-5}`;
+        log('sel-output', 'SELECT', `选中变化 → 共 ${keys.size} 条`);
+      },
+      onFocusChange: (key, item) => {
+        document.getElementById('sel-focus').textContent = key != null ? key : '-';
+        if (key != null) log('sel-output', 'FOCUS', `焦点 → id=${key}`);
       }
     });
     list.setData(data);
-    updateStat();
-    list.container.scrollTop = 320 * 64; // 滚到大约中间
-    logOutput('anchor-output', 'INIT', `初始加载 ${data.length} 条,已滚动到中间位置`);
+    document.getElementById('sel-total').textContent = data.length.toLocaleString();
   }
-
-  function updateStat() {
-    document.getElementById('anchor-stat-total').textContent = data.length.toLocaleString();
-    document.getElementById('anchor-stat-key').textContent = anchoredKey != null ? anchoredKey : '-';
+  function update() {
+    document.getElementById('sel-total').textContent = data.length.toLocaleString();
   }
-
-  function rememberAnchor() {
-    const range = list.getVisibleRange();
-    if (range.items.length > 0) {
-      anchoredKey = range.items[0].id;
-      updateStat();
-    }
+  function init() {
+    data = gen(8000, 1000);
+    rebuild();
+    document.getElementById('sel-mode').onchange = rebuild;
   }
-
-  function prependData() {
-    rememberAnchor();
-    const minId = Math.min(...data.map(d => d.id));
-    const add = gen(50, minId - 50);
-    data = [...add, ...data];
-    list.setData(data);
-    updateStat();
-    logOutput('anchor-output', 'PREPEND', `在前面插入 50 条(id ${add[0].id}~${add[add.length-1].id}),锚定 key=${anchoredKey}`);
-  }
-
-  function appendData() {
-    rememberAnchor();
-    const maxId = Math.max(...data.map(d => d.id));
-    const add = gen(50, maxId + 1);
-    data = [...data, ...add];
-    list.appendData(add);
-    updateStat();
-    logOutput('anchor-output', 'APPEND', `在后面追加 50 条(id ${add[0].id}~${add[add.length-1].id}),锚定 key=${anchoredKey}`);
-  }
-
-  function shuffleAndReload() {
-    rememberAnchor();
-    // 复制一份加乱序标记
-    data = [...data].sort(() => Math.random() - 0.5);
-    list.setData(data);
-    updateStat();
-    logOutput('anchor-output', 'SHUFFLE', `数据已打乱顺序,仍保持在 key=${anchoredKey} 附近`);
-  }
-
-  function refresh() {
-    rememberAnchor();
-    list.refresh();
-    logOutput('anchor-output', 'REFRESH', '调用了 refresh() 清空高度缓存');
-  }
-
-  function jumpMiddle() {
-    const targetId = data[500] ? data[500].id : null;
-    if (targetId != null) {
-      anchoredKey = targetId;
-      updateStat();
-      list.scrollToItem(targetId, { align: 'start', behavior: 'smooth' });
-      logOutput('anchor-output', 'SCROLL', `滚动到 item id=${targetId} 并锚定`);
-    }
-  }
-
   window.addEventListener('DOMContentLoaded', init);
-  return { prependData, appendData, shuffleAndReload, refresh, jumpMiddle };
+  return {
+    selectAll() { if (!list) return; list.selectAll(); },
+    clearSel() { if (!list) return; list.clearSelection(); },
+    prepend50() {
+      const min = Math.min(...data.map(d => d.id));
+      const add = gen(50, min - 50);
+      data = [...add, ...data];
+      list.setData(data); update();
+      log('sel-output', 'PREPEND', `前插 ${add.length} 条,选中和焦点已按 ID 保留`);
+    },
+    append50() {
+      const max = Math.max(...data.map(d => d.id));
+      const add = gen(50, max + 1);
+      data = [...data, ...add];
+      list.appendData(add); update();
+      log('sel-output', 'APPEND', `后追 ${add.length} 条,选中和焦点已按 ID 保留`);
+    },
+    shuffle() {
+      data = [...data].sort(() => Math.random() - 0.5);
+      list.setData(data); update();
+      log('sel-output', 'SHUFFLE', `顺序打乱,选中和焦点已按 ID 保留`);
+    },
+    focusFirst() {
+      if (!list || data.length === 0) return;
+      list.setFocused && list.setFocusedItem(data[0].id);
+      list.scrollToItem(data[0].id);
+    }
+  };
 })();
 
-/* ==========================================================
- * ② 动态行高稳定性 Demo
- * ========================================================== */
-const dynamicDemo = (() => {
+/* ============================================================
+ * ② 分组折叠展开
+ * ============================================================ */
+const grpDemo = (() => {
   let list;
-  let showImages = true;
-  let startIdForAppend = 0;
-
-  const SHORT_DESCS = ['简短描述', '一行内容'];
-  const LONG_DESCS = [
-    '这是一段中等长度的描述文字,用于展示不同行高的效果,ResizeObserver会测量实际高度。',
-    '这是一段非常长的描述文字。它用于测试动态行高功能,包含了更多的内容,会占据更多的垂直空间。通过这个长文本,可以验证ResizeObserver是否准确测量每一行的实际高度,同时验证底部是否出现空白、项之间是否出现重叠。'
-  ];
-
-  function genData(n) {
+  let seq = 0;
+  function makeG(key, title, n, startId=1) {
+    const items = [];
+    for (let i = 0; i < n; i++) items.push({ id: `${key}-${startId+i}`, title: `子项 ${startId+i}`, desc: `属于 ${title}` });
+    return { groupKey: key, group: title, items };
+  }
+  function initial() {
     const arr = [];
-    for (let i = 0; i < n; i++) {
-      const id = startIdForAppend++;
-      const useLong = i % 3 === 0;
-      const pool = useLong ? LONG_DESCS : SHORT_DESCS;
-      const desc = pool[i % pool.length];
-      arr.push({ id, title: `动态项 #${id}`, desc, hasImage: (i % 4 === 0) });
+    for (let g = 0; g < 12; g++) {
+      seq++;
+      arr.push(makeG(`G-${seq}`, `分组 ${seq} (G-${seq})`, 15, 1));
     }
     return arr;
   }
+  function renderHeader(ctx) {
+    const { group, groupKey, data, collapsed } = ctx;
+    const div = document.createElement('div');
+    div.className = 'vl-group' + (collapsed ? ' collapsed' : '');
+    div.innerHTML = `
+      <div class="left"><span class="caret">▼</span>📁 ${group}</div>
+      <span class="num">${data.items.length} 项${collapsed ? ' · 折叠' : ''}</span>`;
+    return div;
+  }
+  function renderSticky(ctx) {
+    const { group, groupKey, data, collapsed } = ctx;
+    const div = document.createElement('div');
+    div.className = 'vl-sticky' + (collapsed ? ' collapsed' : '');
+    div.innerHTML = `
+      <div class="left"><span class="caret">▼</span>📌 ${group} · 吸顶中</div>
+      <span class="num">${data.items.length} 项${collapsed ? ' · 折叠' : ''}</span>`;
+    div.style.cursor = 'pointer';
+    return div;
+  }
+  function renderItem(ctx) {
+    const { item, selected, focused, groupIndex, itemIndex } = ctx;
+    const div = document.createElement('div');
+    div.className = 'vl-item';
+    div.innerHTML = `
+      <div class="vl-check"></div>
+      <div class="vl-avatar ${av(itemIndex)}">${ach(itemIndex)}</div>
+      <div class="vl-body">
+        <div class="vl-title"><span class="tag">${groupIndex}-${itemIndex}</span>${item.title}</div>
+        <div class="vl-desc">key=${item.id} · ${item.desc}</div>
+      </div>`;
+    return div;
+  }
+  function catClick(k) { list.scrollToGroup(k, { behavior: 'smooth' }); }
+  function refreshStats() {
+    document.getElementById('grp-groups').textContent = list.data.length;
+    document.getElementById('grp-items').textContent = list.data.reduce((s,g)=>s+g.items.length, 0);
+    document.getElementById('grp-collapsed').textContent = list.collapsedGroups.size;
+    const sticky = list.getCurrentStickyGroup();
+    document.getElementById('grp-sticky').textContent = sticky ? sticky.key : '-';
+    document.getElementById('grp-cat-count').textContent = list.data.length;
+    const ul = document.getElementById('grp-catalog');
+    ul.innerHTML = '';
+    list.data.forEach(g => {
+      const k = list.options.getGroupKey(g);
+      const li = document.createElement('li');
+      const collapsed = list.isGroupCollapsed(k);
+      let html = `<span>${collapsed ? '▸' : '▾'} ${g.group}</span><span class="c">${g.items.length}项</span>`;
+      li.innerHTML = html;
+      if (sticky && sticky.key === k) li.classList.add('active');
+      li.onclick = () => catClick(k);
+      ul.appendChild(li);
+    });
+  }
+  function init() {
+    const data = initial();
+    list = new VirtualList(document.getElementById('grp-list'), {
+      itemHeight: 58,
+      estimatedHeaderHeight: 40,
+      buffer: 8,
+      selectionMode: 'multiple',
+      getItemKey: it => it.id,
+      getGroupKey: g => g.groupKey,
+      renderItem: renderItem,
+      renderGroupHeader: renderHeader,
+      renderStickyHeader: renderSticky,
+      onStickyGroupChange: g => {
+        refreshStats();
+        log('grp-output', 'STICKY', g ? `吸顶 → ${g.key}` : '无吸顶');
+      },
+      onGroupCollapseChange: (k, c) => {
+        refreshStats();
+        log('grp-output', c ? 'COLLAPSE' : 'EXPAND', `${k} ${c ? '已折叠' : '已展开'}`);
+      },
+      onSelectionChange: (keys, items) => {
+        log('grp-output', 'SELECT', `共选中 ${keys.size} 条`);
+      },
+      onVisibleRangeChange: () => refreshStats()
+    });
+    list.setData(data);
+    refreshStats();
+  }
+  window.addEventListener('DOMContentLoaded', init);
+  return {
+    appendNewG() {
+      seq++;
+      const g = makeG(`G-${seq}`, `新分组 ${seq} (G-${seq})`, 12, 1);
+      list.appendData([g]);
+      refreshStats();
+      log('grp-output', 'APPEND', `新增分组 ${g.groupKey}`);
+    },
+    appendToG1() {
+      const key = 'G-1';
+      const g0 = list.data.find(g => list.options.getGroupKey(g) === key);
+      if (!g0) return;
+      const g = makeG(key, g0.group, 8, g0.items.length + 1);
+      list.appendData([g]);
+      refreshStats();
+      log('grp-output', 'MERGE', `向 G-1 追加 8 条(合并到原分组,折叠状态保留)`);
+    },
+    appendMixed() {
+      const grps = [];
+      if (list.data[1]) { const g = list.data[1]; grps.push(makeG(list.options.getGroupKey(g), g.group, 5, g.items.length + 1)); }
+      if (list.data[3]) { const g = list.data[3]; grps.push(makeG(list.options.getGroupKey(g), g.group, 5, g.items.length + 1)); }
+      seq++; grps.push(makeG(`G-${seq}`, `全新分组 ${seq}`, 10, 1));
+      list.appendData(grps);
+      refreshStats();
+      log('grp-output', 'MIXED', `追加 2 个已有分组合并 + 1 个新分组`);
+    },
+    collapseAll() { list.data.forEach(g => list.setGroupCollapsed(list.options.getGroupKey(g), true)); refreshStats(); log('grp-output', 'COLLAPSE', `全部折叠`); },
+    expandAll() { list.data.forEach(g => list.setGroupCollapsed(list.options.getGroupKey(g), false)); refreshStats(); log('grp-output', 'EXPAND', `全部展开`); }
+  };
+})();
 
-  function renderDynamic({ item, index }) {
+/* ============================================================
+ * ③ 固定行高 位置保持
+ * ============================================================ */
+const fixDemo = (() => {
+  let list;
+  let data = [];
+  let seed = 200000;
+  function gen(n, start=0) {
+    const a = [];
+    for (let i = 0; i < n; i++) { const id = start + i; a.push({ id, title: `订单 #${id}`, desc: `金额 ¥${(Math.random()*10000).toFixed(2)}, 支付方式 ${['支付宝','微信','银行卡'][id%3]}` }); }
+    return a;
+  }
+  function render(ctx) {
+    const { item, index } = ctx;
+    const div = document.createElement('div');
+    div.className = 'vl-item';
+    div.innerHTML = `
+      <div class="vl-avatar ${av(item.id)}">${ach(item.id)}</div>
+      <div class="vl-body">
+        <div class="vl-title"><span class="tag">${index}</span>${item.title}</div>
+        <div class="vl-desc">id=${item.id} · ${item.desc}</div>
+      </div>`;
+    return div;
+  }
+  function tick() {
+    document.getElementById('fix-st').textContent = Math.round(list ? list.container.scrollTop : 0);
+    const r = list ? list.getVisibleRange() : null;
+    document.getElementById('fix-anchor').textContent = (r && r.items.length > 0) ? r.items[0].id : '-';
+  }
+  function init() {
+    data = gen(6000, 50000);
+    list = new VirtualList(document.getElementById('fix-list'), {
+      itemHeight: 60, buffer: 8,
+      getItemKey: it => it.id, renderItem: render,
+      onVisibleRangeChange: r => { document.getElementById('fix-dom').textContent = (r.endIndex - r.startIndex); tick(); }
+    });
+    list.setData(data);
+    list.container.scrollTop = 250 * 60;
+    document.getElementById('fix-total').textContent = data.length.toLocaleString();
+    setInterval(tick, 300);
+  }
+  window.addEventListener('DOMContentLoaded', init);
+  return {
+    prepend() {
+      log('fix-output', 'BEFORE', `操作前: scrollTop=${Math.round(list.container.scrollTop)}, 看到首条id=${list.getVisibleRange().items[0]?.id ?? '-'}`);
+      const min = Math.min(...data.map(d => d.id));
+      const add = gen(100, min - 100);
+      data = [...add, ...data];
+      list.setData(data);
+      document.getElementById('fix-total').textContent = data.length.toLocaleString();
+      setTimeout(() => {
+        log('fix-output', 'PREPEND', `前插 100 条后: scrollTop=${Math.round(list.container.scrollTop)}, 看到首条id=${list.getVisibleRange().items[0]?.id ?? '-'}`);
+      }, 50);
+    },
+    append() {
+      log('fix-output', 'BEFORE', `操作前: scrollTop=${Math.round(list.container.scrollTop)}, 看到首条id=${list.getVisibleRange().items[0]?.id ?? '-'}`);
+      const max = Math.max(...data.map(d => d.id));
+      const add = gen(100, max + 1);
+      data = [...data, ...add];
+      list.appendData(add);
+      document.getElementById('fix-total').textContent = data.length.toLocaleString();
+      setTimeout(() => log('fix-output', 'APPEND', `后追 100 条后: scrollTop=${Math.round(list.container.scrollTop)}, 首条id=${list.getVisibleRange().items[0]?.id ?? '-'}`), 50);
+    },
+    reload() {
+      log('fix-output', 'BEFORE', `重载前 scrollTop=${Math.round(list.container.scrollTop)}, 首条id=${list.getVisibleRange().items[0]?.id ?? '-'}`);
+      seed += 10000;
+      data = gen(6000, seed);
+      list.setData(data);
+      document.getElementById('fix-total').textContent = data.length.toLocaleString();
+      setTimeout(() => log('fix-output', 'RELOAD', `重载完成 scrollTop=${Math.round(list.container.scrollTop)} (新数据ID起点 ${seed})`), 50);
+    },
+    refresh() {
+      log('fix-output', 'REFRESH', `调用了 refresh(),当前首条id=${list.getVisibleRange().items[0]?.id ?? '-'}`);
+      list.refresh();
+    }
+  };
+})();
+
+/* ============================================================
+ * ④ 动态行高 + 精确曝光
+ * ============================================================ */
+const dynDemo = (() => {
+  let list;
+  let showImgs = true;
+  let seed = 1;
+  const SHORT = ['短描述','一行内容','简短说明'];
+  const LONG = [
+    '中等长度的描述文本,用来展示ResizeObserver如何准确测量不同行高,曝光范围会精确到真正进入视口的第一条。',
+    '非常长的描述:这里包含大量文本用于撑高行高,动态高度会被ResizeObserver精确捕获,同时图片加载完成后高度再次更新,当前屏幕内容不会跳动,而是以锚点项为基准对齐到新高度。用于测试:1)滚动条总长是否准确 2)项与项之间是否出现重叠 3)底部空白是否消失 4)撑高后视口内的内容是否平滑对齐。'
+  ];
+  function gen(n) {
+    const a = [];
+    for (let i = 0; i < n; i++) {
+      const id = seed++;
+      const useLong = (i % 3 === 0);
+      const desc = (useLong ? LONG : SHORT)[i % (useLong ? LONG.length : SHORT.length)];
+      a.push({ id, title: `记录 ${id}`, desc, hasImg: (i % 4 === 0) });
+    }
+    return a;
+  }
+  function render(ctx) {
+    const { item, index } = ctx;
     const div = document.createElement('div');
     div.className = 'vl-item';
     let imgHtml = '';
-    if (item.hasImage && showImages) {
-      // 使用占位图服务,模拟真实图片加载后高度变化
-      const w = 320, h = 80 + (item.id % 5) * 30;
-      imgHtml = `<img src="https://picsum.photos/seed/vl${item.id}/${w}/${h}" alt="" style="width:${w}px;height:auto;"/>`;
+    if (item.hasImg && showImgs) {
+      const w = 260, h = 70 + (item.id % 5) * 30;
+      imgHtml = `<img src="https://picsum.photos/seed/exp${item.id}/${w}/${h}" alt=""/>`;
     }
     div.innerHTML = `
-      ${avatarFor(item.id)}
+      <div class="vl-avatar ${av(item.id)}">${ach(item.id)}</div>
       <div class="vl-body">
-        <div class="vl-title"><span class="idx-tag">${index}</span>${item.title}</div>
-        <div class="vl-desc long">${item.desc}${imgHtml}</div>
-      </div>
-    `;
+        <div class="vl-title"><span class="tag">${index}</span>${item.title}</div>
+        <div class="vl-desc" style="white-space:normal;">id=${item.id} · ${item.desc}${imgHtml}</div>
+      </div>`;
     return div;
   }
-
-  function init() {
-    const data = genData(2000);
-    const container = document.getElementById('dynamic-list');
-    list = new VirtualList(container, {
-      estimatedItemHeight: 70,
-      estimatedHeaderHeight: 40,
-      buffer: 5,
-      getItemKey: item => item.id,
-      renderItem: renderDynamic,
-      onVisibleRangeChange: () => updateStats()
-    });
-    list.setData(data);
-    updateStats();
-  }
-
+  let lastStartId = null;
   function updateStats() {
     if (!list) return;
-    document.getElementById('dynamic-stat-total').textContent = list.data.length.toLocaleString();
-    // 预估 vs 实际
-    const estimated = list.flatItems.length * 70;
-    const real = list.totalHeight;
-    document.getElementById('dynamic-stat-estimated').textContent = estimated.toLocaleString();
-    document.getElementById('dynamic-stat-real').textContent = real.toLocaleString();
-    document.getElementById('dynamic-stat-measured').textContent = list.heightsByKey.size.toLocaleString();
+    const est = list.flatItems.length * 70;
+    document.getElementById('dyn-est').textContent = est.toLocaleString();
+    document.getElementById('dyn-real').textContent = list.totalHeight.toLocaleString();
+    document.getElementById('dyn-measured').textContent = list.heightsByKey.size.toLocaleString();
   }
-
-  function toggleImages() {
-    showImages = !showImages;
-    list.refresh();
-    setTimeout(updateStats, 500);
-  }
-
-  function addLongText() {
-    const add = [];
-    for (let i = 0; i < 100; i++) {
-      const id = startIdForAppend++;
-      add.push({
-        id, title: `追加项 #${id}`,
-        desc: LONG_DESCS[i % LONG_DESCS.length],
-        hasImage: (i % 3 === 0)
-      });
+  function renderExposure(r) {
+    document.getElementById('dyn-count').textContent = r.items.length + '条';
+    const ul = document.getElementById('dyn-exposure');
+    ul.innerHTML = '';
+    r.items.slice(0, 25).forEach((it, i) => {
+      const li = document.createElement('li');
+      let mark = '';
+      if (i === 0) mark = ' 👁️‍🗨️ 曝光起点';
+      li.innerHTML = `<span>Item #${it.id}${mark}</span><span class="c">${it.title.split(' ')[0]}</span>`;
+      ul.appendChild(li);
+    });
+    if (r.items.length > 25) {
+      const li = document.createElement('li');
+      li.innerHTML = `<span>...还有 ${r.items.length - 25} 条</span>`;
+      ul.appendChild(li);
     }
-    list.appendData(add);
-    setTimeout(updateStats, 500);
   }
-
-  function refresh() {
-    list.refresh();
-    setTimeout(updateStats, 300);
-  }
-
-  window.addEventListener('DOMContentLoaded', init);
-  return { toggleImages, addLongText, refresh };
-})();
-
-/* ==========================================================
- * ③ 滚动控制 API Demo
- * ========================================================== */
-const controlDemo = (() => {
-  let list;
-
   function init() {
-    const data = [];
-    for (let i = 0; i < 10000; i++) {
-      data.push({ id: i, title: `控制项 #${i}`, desc: `这是 id=${i} 的数据项` });
-    }
-    const container = document.getElementById('control-list');
-    list = new VirtualList(container, {
-      itemHeight: 64,
-      buffer: 8,
-      getItemKey: item => item.id,
-      renderItem: (ctx) => renderSimpleItem(ctx),
-      onVisibleRangeChange: (r) => {
-        document.getElementById('ctrl-stat-count').textContent = r.items.length;
-        document.getElementById('ctrl-stat-start').textContent = r.items.length > 0 ? r.items[0].id : '-';
-        document.getElementById('ctrl-stat-end').textContent = r.items.length > 0 ? r.items[r.items.length - 1].id : '-';
-        // 更新右侧可见列表
-        const ul = document.getElementById('ctrl-visible-list');
-        ul.innerHTML = '';
-        r.items.slice(0, 30).forEach(item => {
-          const li = document.createElement('li');
-          li.innerHTML = `<span>Item #${item.id}</span><span class="c">${item.title.split(' ')[0]}</span>`;
-          ul.appendChild(li);
-        });
-        if (r.items.length > 30) {
-          const more = document.createElement('li');
-          more.innerHTML = `<span>...还有 ${r.items.length - 30} 条</span>`;
-          ul.appendChild(more);
+    const data = gen(1500);
+    list = new VirtualList(document.getElementById('dyn-list'), {
+      estimatedItemHeight: 70, estimatedHeaderHeight: 40, buffer: 5,
+      getItemKey: it => it.id, renderItem: render,
+      onVisibleRangeChange: r => {
+        updateStats();
+        renderExposure(r);
+        if (r.items.length > 0 && r.items[0].id !== lastStartId) {
+          lastStartId = r.items[0].id;
+          const firstThree = r.items.slice(0,3).map(i => i.id).join(', ');
+          log('dyn-output', 'EXPOSE', `新一批曝光起点 id=${r.items[0].id},前3条: ${firstThree}(共 ${r.items.length} 条)`);
         }
       }
     });
     list.setData(data);
+    updateStats();
   }
-
-  function scrollToItem() {
-    const input = document.getElementById('ctrl-item-input');
-    const align = document.getElementById('ctrl-align').value;
-    const id = parseInt(input.value);
-    if (isNaN(id)) return;
-    const ok = list.scrollToItem(id, { behavior: 'smooth', align });
-    if (!ok) alert(`未找到 id=${id} 的数据项`);
-  }
-
   window.addEventListener('DOMContentLoaded', init);
-  return { scrollToItem };
-})();
-
-/* ==========================================================
- * ④ 分组吸附 + 合并追加 Demo
- * ========================================================== */
-const groupDemo = (() => {
-  let list;
-  let groupSeq = 0;
-
-  function makeGroup(groupKey, title, itemCount, startId = 0) {
-    const items = [];
-    for (let i = 0; i < itemCount; i++) {
-      items.push({ id: `${groupKey}-${startId + i}`, title: `子项 ${startId + i + 1}`, desc: `属于分组 ${title}` });
-    }
-    return { groupKey, group: title, items };
-  }
-
-  function genInitialData() {
-    const arr = [];
-    for (let g = 0; g < 10; g++) {
-      groupSeq++;
-      arr.push(makeGroup(`G-${g + 1}`, `分组 ${g + 1} (G-${g + 1})`, 20, 1));
-    }
-    return arr;
-  }
-
-  function renderGroupHeader(group, groupIndex, groupData) {
-    const div = document.createElement('div');
-    div.className = 'vl-group';
-    div.innerHTML = `<span>📁 ${group}</span><span class="count">${groupData.items.length} 项</span>`;
-    return div;
-  }
-  function renderSticky(group, groupIndex, groupData) {
-    const div = document.createElement('div');
-    div.className = 'vl-sticky';
-    div.innerHTML = `<span>📌 ${group} - 吸顶中</span><span class="count">${groupData.items.length} 项</span>`;
-    return div;
-  }
-  function renderGroupItem({ item, groupIndex, itemIndex, group, key }) {
-    const div = document.createElement('div');
-    div.className = 'vl-item';
-    div.innerHTML = `
-      ${avatarFor(itemIndex)}
-      <div class="vl-body">
-        <div class="vl-title"><span class="idx-tag">${groupIndex}-${itemIndex}</span>${item.title}</div>
-        <div class="vl-desc">itemKey=${key} · ${item.desc}</div>
-      </div>
-    `;
-    return div;
-  }
-
-  function updateStats() {
-    if (!list) return;
-    document.getElementById('group-stat-groups').textContent = list.data.length;
-    const totalItems = list.data.reduce((s, g) => s + g.items.length, 0);
-    document.getElementById('group-stat-items').textContent = totalItems;
-    const sticky = list.getCurrentStickyGroup();
-    document.getElementById('group-stat-sticky').textContent = sticky ? sticky.key : '-';
-
-    // 更新目录
-    const ul = document.getElementById('group-catalog');
-    ul.innerHTML = '';
-    list.data.forEach(g => {
-      const li = document.createElement('li');
-      li.innerHTML = `<span>${g.group}</span><span class="c">${g.items.length}项</span>`;
-      const isActive = sticky && sticky.key === list.options.getGroupKey(g);
-      if (isActive) li.classList.add('active');
-      li.addEventListener('click', () => {
-        list.scrollToGroup(list.options.getGroupKey(g), { behavior: 'smooth' });
-      });
-      ul.appendChild(li);
-    });
-  }
-
-  function init() {
-    const data = genInitialData();
-    const container = document.getElementById('group-list');
-    list = new VirtualList(container, {
-      itemHeight: 64,
-      estimatedHeaderHeight: 44,
-      buffer: 8,
-      getItemKey: item => item.id,
-      getGroupKey: group => group.groupKey,
-      renderItem: renderGroupItem,
-      renderGroupHeader: renderGroupHeader,
-      renderStickyHeader: renderSticky,
-      onStickyGroupChange: (g) => {
-        logOutput('group-output', 'STICKY', g ? `吸顶分组切换为: ${g.key} (${g.group})` : '离开所有分组');
-        updateStats();
-      },
-      onVisibleRangeChange: () => updateStats()
-    });
-    list.setData(data);
-    updateStats();
-    logOutput('group-output', 'INIT', `加载初始数据,共 ${data.length} 个分组`);
-  }
-
-  function appendNewGroup() {
-    groupSeq++;
-    const key = `G-${groupSeq}`;
-    const grp = makeGroup(key, `新分组 ${groupSeq} (${key})`, 15, 1);
-    list.appendData([grp]);
-    updateStats();
-    logOutput('group-output', 'APPEND', `追加新分组 ${key},共 ${grp.items.length} 项`);
-  }
-
-  function appendToExistingGroup() {
-    // 向已有分组 G-1 追加
-    const existing = list.data.find(g => list.options.getGroupKey(g) === 'G-1');
-    if (!existing) return;
-    const startId = existing.items.length + 1;
-    const grp = makeGroup('G-1', existing.group, 10, startId);
-    list.appendData([grp]);
-    updateStats();
-    logOutput('group-output', 'MERGE', `向已有分组 G-1 追加 ${grp.items.length} 项(合并而非新建)`);
-  }
-
-  function appendMixed() {
-    const newGrps = [];
-    // 两个已有分组
-    if (list.data[0]) {
-      const k0 = list.options.getGroupKey(list.data[0]);
-      newGrps.push(makeGroup(k0, list.data[0].group, 5, list.data[0].items.length + 1));
-    }
-    if (list.data[2]) {
-      const k2 = list.options.getGroupKey(list.data[2]);
-      newGrps.push(makeGroup(k2, list.data[2].group, 5, list.data[2].items.length + 1));
-    }
-    // 一个新分组
-    groupSeq++;
-    const key = `G-${groupSeq}`;
-    newGrps.push(makeGroup(key, `新分组 ${groupSeq} (${key})`, 10, 1));
-
-    list.appendData(newGrps);
-    updateStats();
-    logOutput('group-output', 'MIXED', `混合追加:2个已有分组合并 + 1个新分组`);
-  }
-
-  window.addEventListener('DOMContentLoaded', init);
-  return { appendNewGroup, appendToExistingGroup, appendMixed };
+  return {
+    toggleImgs() { showImgs = !showImgs; list.refresh(); setTimeout(updateStats, 600); log('dyn-output', 'CONFIG', `图片:${showImgs ? '显示' : '隐藏'},已刷新高度缓存`); },
+    addLong() { list.appendData(gen(100)); setTimeout(updateStats, 600); log('dyn-output', 'APPEND', `追加 100 条含长文本数据`); },
+    forceTop() { list.container.scrollTo({ top: 0, behavior: 'smooth' }); }
+  };
 })();
 </script>
 </body>
