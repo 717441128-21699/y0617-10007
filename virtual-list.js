@@ -47,6 +47,8 @@ class VirtualList {
     this.focusedKey = null;
     this._lastRangeSelectedKey = null;
     this.collapsedGroups = new Set();
+    this._stateVersion = 0;
+    this._lastRenderedStateVersion = -1;
 
     if (this.options.defaultSelectedKeys) {
       const arr = Array.isArray(this.options.defaultSelectedKeys)
@@ -168,6 +170,7 @@ class VirtualList {
 
     this._applySelectionByPointer(itemKey, e);
     this._setFocusedItem(itemKey);
+    this._scheduleRender();
   }
 
   _applySelectionByPointer(itemKey, e) {
@@ -219,15 +222,17 @@ class VirtualList {
     if (key === 'ArrowUp' || key === 'ArrowDown') {
       e.preventDefault();
       const step = key === 'ArrowUp' ? -1 : 1;
+      const oldFocusedKey = this.focusedKey;
       const nextItemKey = this._findNextItemKey(this.focusedKey, step, true);
       if (nextItemKey == null) return;
-      if (e.shiftKey && mode === 'multiple') {
-        this._selectRange(this._lastRangeSelectedKey != null ? this._lastRangeSelectedKey : nextItemKey, nextItemKey);
+      if (e.shiftKey && mode === 'multiple' && oldFocusedKey != null) {
+        this._selectRange(oldFocusedKey, nextItemKey);
       }
-      this._setFocusedItem(nextItemKey);
+      this._setFocusedItem(nextItemKey, { updateAnchor: !e.shiftKey });
       const full = `__item_${nextItemKey}`;
       const idx = this.keyToFlatIndex.get(full);
       if (idx != null) this._scrollItemIntoViewIfNeeded(idx);
+      this._scheduleRender();
       return;
     }
 
@@ -239,7 +244,7 @@ class VirtualList {
       if (e.shiftKey && mode === 'multiple' && hasFocus && oldFocusedKey != null) {
         this._selectRange(oldFocusedKey, targetKey);
       }
-      this._setFocusedItem(targetKey);
+      this._setFocusedItem(targetKey, { updateAnchor: !e.shiftKey });
       const full = `__item_${targetKey}`;
       const idx = this.keyToFlatIndex.get(full);
       if (idx != null) {
@@ -255,6 +260,7 @@ class VirtualList {
         this._captureAnchor();
         this._scrollItemIntoViewIfNeeded(idx);
       }
+      this._scheduleRender();
       return;
     }
 
@@ -277,7 +283,7 @@ class VirtualList {
       if (e.shiftKey && mode === 'multiple' && hasFocus && oldFocusedKey != null) {
         this._selectRange(oldFocusedKey, nextItemKey);
       }
-      this._setFocusedItem(nextItemKey);
+      this._setFocusedItem(nextItemKey, { updateAnchor: !e.shiftKey });
       const full = `__item_${nextItemKey}`;
       const idx = this.keyToFlatIndex.get(full);
       if (idx != null) {
@@ -409,6 +415,7 @@ class VirtualList {
   _replaceSelection(keys) {
     this.selectedKeys = new Set(keys);
     if (keys.length > 0) this._lastRangeSelectedKey = keys[keys.length - 1];
+    this._stateVersion++;
     this._emitSelectionChange();
     this._scheduleRender();
   }
@@ -426,6 +433,7 @@ class VirtualList {
       const last = [...this.selectedKeys].pop();
       this._lastRangeSelectedKey = last;
     }
+    this._stateVersion++;
     if (emit) this._emitSelectionChange();
     this._scheduleRender();
   }
@@ -436,6 +444,7 @@ class VirtualList {
     if (sk == null) return;
     this.selectedKeys = new Set([sk]);
     this._lastRangeSelectedKey = sk;
+    this._stateVersion++;
     this._emitSelectionChange();
     this._scheduleRender();
   }
@@ -450,6 +459,7 @@ class VirtualList {
       this.selectedKeys.add(sk);
       this._lastRangeSelectedKey = sk;
     }
+    this._stateVersion++;
     this._emitSelectionChange();
     this._scheduleRender();
   }
@@ -457,6 +467,7 @@ class VirtualList {
   clearSelection() {
     if (this.selectedKeys.size === 0) return;
     this.selectedKeys.clear();
+    this._stateVersion++;
     this._emitSelectionChange();
     this._scheduleRender();
   }
@@ -501,6 +512,7 @@ class VirtualList {
     const before = this.focusedKey;
     this.focusedKey = sk;
     if (sk != null) this._lastRangeSelectedKey = sk;
+    this._stateVersion++;
     if (emit && before !== sk && this.options.onFocusChange) {
       let item = null;
       if (sk != null) {
@@ -543,11 +555,12 @@ class VirtualList {
     return sk != null && this.focusedKey === sk;
   }
 
-  _setFocusedItem(itemKey) {
+  _setFocusedItem(itemKey, { updateAnchor = true } = {}) {
     const before = this.focusedKey;
     const sk = this._toStrKey(itemKey);
     this.focusedKey = sk;
-    if (sk != null) this._lastRangeSelectedKey = sk;
+    if (updateAnchor && sk != null) this._lastRangeSelectedKey = sk;
+    this._stateVersion++;
     if (before !== sk && this.options.onFocusChange) {
       let item = null;
       if (sk != null) {
@@ -607,6 +620,9 @@ class VirtualList {
     this._updateOffsets();
     this.scrollContent.style.height = `${this.totalHeight}px`;
     if (this.anchor) this._restoreAnchor();
+    this._stateVersion++;
+    this.visibleStartIndex = -1;
+    this.visibleEndIndex = -1;
     if (this.options.onGroupCollapseChange) {
       this.options.onGroupCollapseChange(this._origKey(gk), this.collapsedGroups.has(gk));
     }
@@ -692,6 +708,9 @@ class VirtualList {
     this._updateOffsets();
     this.scrollContent.style.height = `${this.totalHeight}px`;
     if (this.anchor) this._restoreAnchor();
+    this._stateVersion++;
+    this.visibleStartIndex = -1;
+    this.visibleEndIndex = -1;
     if (emitEach && this.options.onGroupCollapseChange) {
       for (const k of changedKeys) this.options.onGroupCollapseChange(this._origKey(k), this.collapsedGroups.has(k));
     }
@@ -889,6 +908,7 @@ class VirtualList {
     const viewportStart = start + this.options.buffer;
     const viewportEnd = end - this.options.buffer;
     const rangeChanged = start !== this.visibleStartIndex || end !== this.visibleEndIndex;
+    const stateChanged = this._stateVersion !== this._lastRenderedStateVersion;
 
     if (rangeChanged && this.options.onVisibleRangeChange) {
       const s = Math.max(0, viewportStart);
@@ -897,7 +917,8 @@ class VirtualList {
       this.options.onVisibleRangeChange(trueRange);
     }
 
-    if (start === this.visibleStartIndex && end === this.visibleEndIndex) return;
+    if (!rangeChanged && !stateChanged) return;
+    this._lastRenderedStateVersion = this._stateVersion;
     this.visibleStartIndex = start;
     this.visibleEndIndex = end;
 
