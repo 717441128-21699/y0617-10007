@@ -4,25 +4,35 @@ class VirtualList {
     this.options = {
       itemHeight: null,
       estimatedItemHeight: 50,
+      estimatedHeaderHeight: 40,
       buffer: 5,
       threshold: 200,
       renderItem: null,
       renderGroupHeader: null,
       renderStickyHeader: null,
       onLoadMore: null,
+      onVisibleRangeChange: null,
+      onStickyGroupChange: null,
+      getItemKey: (item) => (item && item.id != null) ? item.id : null,
+      getGroupKey: (group) => (group && group.groupKey != null) ? group.groupKey : (group ? group.group : null),
       ...options
     };
 
     this.data = [];
     this.flatItems = [];
-    this.heights = new Map();
+    this.heightsByKey = new Map();
     this.offsets = [];
+    this.keyToFlatIndex = new Map();
     this.scrollTop = 0;
-    this.visibleStartIndex = 0;
-    this.visibleEndIndex = 0;
+    this.visibleStartIndex = -1;
+    this.visibleEndIndex = -1;
     this.isGrouped = false;
     this.isLoading = false;
     this.hasMore = true;
+    this.anchor = null;
+    this.currentStickyGroupKey = null;
+    this._suppressScrollEvent = false;
+    this._rafId = null;
 
     this._init();
   }
@@ -31,7 +41,6 @@ class VirtualList {
     this._setupDOM();
     this._setupResizeObserver();
     this._bindEvents();
-    this._updateTotalHeight();
   }
 
   _setupDOM() {
@@ -68,18 +77,17 @@ class VirtualList {
     }
 
     this.resizeObserver = new ResizeObserver((entries) => {
-      let needsUpdate = false;
+      let changedKeys = [];
       for (const entry of entries) {
-        const index = parseInt(entry.target.dataset.index);
+        const key = entry.target.dataset.key;
         const height = entry.contentRect.height;
-        if (!isNaN(index) && this.heights.get(index) !== height) {
-          this.heights.set(index, height);
-          needsUpdate = true;
+        if (key && this.heightsByKey.get(key) !== height) {
+          this.heightsByKey.set(key, height);
+          changedKeys.push({ key, height });
         }
       }
-      if (needsUpdate) {
-        this._updateOffsets();
-        this._render();
+      if (changedKeys.length > 0) {
+        this._scheduleUpdate(true);
       }
     });
   }
@@ -94,78 +102,182 @@ class VirtualList {
   }
 
   _onScroll() {
+    if (this._suppressScrollEvent) {
+      this._suppressScrollEvent = false;
+      return;
+    }
+
     const newScrollTop = this.container.scrollTop;
-    if (Math.abs(newScrollTop - this.scrollTop) < 1) return;
+    if (Math.abs(newScrollTop - this.scrollTop) < 0.5) return;
 
     this.scrollTop = newScrollTop;
-    this._render();
-    this._updateStickyHeader();
-    this._checkLoadMore();
+    this._captureAnchor();
+    this._scheduleUpdate(false);
   }
 
   _onContainerResize() {
-    this._render();
+    this._scheduleUpdate(false);
+  }
+
+  _scheduleUpdate(shouldRestoreAnchor) {
+    if (this._rafId != null) {
+      cancelAnimationFrame(this._rafId);
+    }
+    this._rafId = requestAnimationFrame(() => {
+      this._rafId = null;
+      this._updateOffsets();
+
+      if (shouldRestoreAnchor && this.anchor && this.options.itemHeight === null) {
+        this._restoreAnchor();
+      }
+
+      this.scrollContent.style.height = `${this.totalHeight}px`;
+      this._render();
+      this._updateStickyHeader();
+      this._checkLoadMore();
+    });
+  }
+
+  _scheduleRender() {
+    if (this._rafId != null) {
+      cancelAnimationFrame(this._rafId);
+    }
+    this._rafId = requestAnimationFrame(() => {
+      this._rafId = null;
+      this._render();
+      this._updateStickyHeader();
+      this._checkLoadMore();
+    });
+  }
+
+  _captureAnchor() {
+    if (this.flatItems.length === 0) {
+      this.anchor = null;
+      return;
+    }
+
+    const { start } = this._getVisibleRangeRaw();
+    for (let i = start; i < this.flatItems.length; i++) {
+      const flat = this.flatItems[i];
+      const key = flat._key;
+      const offset = this.offsets[i];
+      if (offset >= this.scrollTop) {
+        this.anchor = {
+          key,
+          offset: this.scrollTop - offset
+        };
+        return;
+      }
+    }
+  }
+
+  _restoreAnchor() {
+    if (!this.anchor) return;
+    const idx = this.keyToFlatIndex.get(this.anchor.key);
+    if (idx == null) return;
+
+    const newOffset = this.offsets[idx];
+    const newScrollTop = newOffset + this.anchor.offset;
+    this.container.scrollTop = newScrollTop;
+    this.scrollTop = newScrollTop;
+    this._suppressScrollEvent = true;
+  }
+
+  _getFlatKey(flatItem) {
+    if (flatItem.type === 'header') {
+      return `__header_${flatItem._groupKey}`;
+    } else {
+      return `__item_${flatItem._itemKey}`;
+    }
   }
 
   _flattenData(data) {
     const flat = [];
-    this.isGrouped = data.length > 0 && data[0].group !== undefined && Array.isArray(data[0].items);
+    this.keyToFlatIndex.clear();
+    this.isGrouped = data.length > 0
+      && (data[0].group !== undefined || data[0].groupKey !== undefined)
+      && Array.isArray(data[0].items);
 
     if (this.isGrouped) {
       data.forEach((group, groupIndex) => {
-        flat.push({
+        const groupKey = this.options.getGroupKey(group);
+        const headerKey = `__header_${groupKey}`;
+
+        const headerFlat = {
           type: 'header',
           group: group.group,
           groupIndex,
+          _groupKey: groupKey,
+          _key: headerKey,
           data: group
-        });
+        };
+        flat.push(headerFlat);
+        this.keyToFlatIndex.set(headerKey, flat.length - 1);
+
         group.items.forEach((item, itemIndex) => {
-          flat.push({
+          const itemKey = this.options.getItemKey(item);
+          const fullItemKey = `__item_${itemKey}`;
+          const itemFlat = {
             type: 'item',
             item,
             groupIndex,
             itemIndex,
-            group: group.group
-          });
+            group: group.group,
+            _groupKey: groupKey,
+            _itemKey: itemKey,
+            _key: fullItemKey
+          };
+          flat.push(itemFlat);
+          this.keyToFlatIndex.set(fullItemKey, flat.length - 1);
         });
       });
     } else {
       data.forEach((item, index) => {
+        const itemKey = this.options.getItemKey(item);
+        const fullItemKey = `__item_${itemKey}`;
         flat.push({
           type: 'item',
           item,
-          index
+          index,
+          _itemKey: itemKey,
+          _key: fullItemKey
         });
+        this.keyToFlatIndex.set(fullItemKey, flat.length - 1);
       });
     }
 
     return flat;
   }
 
-  _getItemHeight(index) {
+  _getHeightByKey(key, flatItem) {
     if (this.options.itemHeight !== null) {
+      if (flatItem.type === 'header') {
+        return this.options.estimatedHeaderHeight;
+      }
       return this.options.itemHeight;
     }
-    return this.heights.get(index) || this.options.estimatedItemHeight;
+    if (this.heightsByKey.has(key)) {
+      return this.heightsByKey.get(key);
+    }
+    if (flatItem.type === 'header') {
+      return this.options.estimatedHeaderHeight;
+    }
+    return this.options.estimatedItemHeight;
   }
 
   _updateOffsets() {
     const offsets = new Array(this.flatItems.length);
     let offset = 0;
     for (let i = 0; i < this.flatItems.length; i++) {
+      const flat = this.flatItems[i];
       offsets[i] = offset;
-      offset += this._getItemHeight(i);
+      offset += this._getHeightByKey(flat._key, flat);
     }
     this.offsets = offsets;
     this.totalHeight = offset;
   }
 
-  _updateTotalHeight() {
-    this._updateOffsets();
-    this.scrollContent.style.height = `${this.totalHeight}px`;
-  }
-
-  _getVisibleRange() {
+  _getVisibleRangeRaw() {
     const viewportHeight = this.container.clientHeight;
     const scrollTop = this.scrollTop;
     const total = this.flatItems.length;
@@ -188,7 +300,7 @@ class VirtualList {
     let high = this.offsets.length - 1;
 
     while (low <= high) {
-      const mid = Math.floor((low + high) / 2);
+      const mid = (low + high) >> 1;
       if (this.offsets[mid] === target) {
         return mid;
       } else if (this.offsets[mid] < target) {
@@ -202,7 +314,25 @@ class VirtualList {
   }
 
   _render() {
-    const { start, end } = this._getVisibleRange();
+    if (this.offsets.length !== this.flatItems.length) {
+      this._updateOffsets();
+    }
+
+    const { start, end } = this._getVisibleRangeRaw();
+    const viewportStart = start + this.options.buffer;
+    const viewportEnd = end - this.options.buffer;
+
+    const rangeChanged = start !== this.visibleStartIndex || end !== this.visibleEndIndex;
+
+    if (rangeChanged && this.options.onVisibleRangeChange) {
+      const visibleFlat = this.flatItems.slice(viewportStart, viewportEnd);
+      this.options.onVisibleRangeChange({
+        startIndex: viewportStart,
+        endIndex: viewportEnd,
+        items: visibleFlat.map(f => f.type === 'item' ? f.item : null).filter(Boolean),
+        flatItems: visibleFlat
+      });
+    }
 
     if (start === this.visibleStartIndex && end === this.visibleEndIndex) {
       return;
@@ -210,6 +340,10 @@ class VirtualList {
 
     this.visibleStartIndex = start;
     this.visibleEndIndex = end;
+
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+    }
 
     const fragment = document.createDocumentFragment();
     const observedElements = [];
@@ -222,9 +356,12 @@ class VirtualList {
         itemEl.style.top = `${this.offsets[i]}px`;
         itemEl.style.left = '0';
         itemEl.style.width = '100%';
+        itemEl.dataset.key = flatItem._key;
         itemEl.dataset.index = i;
         fragment.appendChild(itemEl);
         observedElements.push(itemEl);
+
+        this._observeImages(itemEl);
       }
     }
 
@@ -236,14 +373,28 @@ class VirtualList {
     }
   }
 
+  _observeImages(rootEl) {
+    if (this.options.itemHeight !== null) return;
+    const images = rootEl.querySelectorAll('img');
+    images.forEach(img => {
+      if (!img.complete) {
+        img.addEventListener('load', () => {
+          this._scheduleUpdate(true);
+        }, { once: true });
+        img.addEventListener('error', () => {
+          this._scheduleUpdate(true);
+        }, { once: true });
+      }
+    });
+  }
+
   _renderItem(flatItem, index) {
     if (flatItem.type === 'header') {
       if (this.options.renderGroupHeader) {
-        const headerEl = this.options.renderGroupHeader(flatItem.group, flatItem.groupIndex);
-        if (headerEl) {
-          headerEl.dataset.index = index;
+        const headerEl = this.options.renderGroupHeader(flatItem.group, flatItem.groupIndex, flatItem.data);
+        if (headerEl && headerEl instanceof HTMLElement) {
+          headerEl.dataset.key = flatItem._key;
           headerEl.dataset.type = 'header';
-          headerEl.dataset.groupIndex = flatItem.groupIndex;
           return headerEl;
         }
       }
@@ -251,11 +402,11 @@ class VirtualList {
     } else {
       if (this.options.renderItem) {
         const itemData = this.isGrouped
-          ? { item: flatItem.item, groupIndex: flatItem.groupIndex, itemIndex: flatItem.itemIndex, group: flatItem.group }
-          : { item: flatItem.item, index: flatItem.index };
+          ? { item: flatItem.item, groupIndex: flatItem.groupIndex, itemIndex: flatItem.itemIndex, group: flatItem.group, groupKey: flatItem._groupKey, key: flatItem._itemKey }
+          : { item: flatItem.item, index: flatItem.index, key: flatItem._itemKey };
         const itemEl = this.options.renderItem(itemData, index);
-        if (itemEl) {
-          itemEl.dataset.index = index;
+        if (itemEl && itemEl instanceof HTMLElement) {
+          itemEl.dataset.key = flatItem._key;
           itemEl.dataset.type = 'item';
           return itemEl;
         }
@@ -267,20 +418,30 @@ class VirtualList {
   _updateStickyHeader() {
     const stickyRender = this.options.renderStickyHeader || this.options.renderGroupHeader;
     if (!this.isGrouped || !stickyRender) {
+      if (this.currentStickyGroupKey !== null) {
+        this.currentStickyGroupKey = null;
+        if (this.options.onStickyGroupChange) {
+          this.options.onStickyGroupChange(null);
+        }
+      }
       this.stickyHeader.style.display = 'none';
       return;
     }
 
     const scrollTop = this.scrollTop;
+    let currentGroupKey = null;
     let currentGroupIndex = -1;
+    let currentGroupData = null;
     let nextHeaderOffset = Infinity;
 
     for (let i = 0; i < this.flatItems.length; i++) {
-      if (this.flatItems[i].type === 'header') {
+      const flat = this.flatItems[i];
+      if (flat.type === 'header') {
         const headerOffset = this.offsets[i];
-
         if (headerOffset <= scrollTop) {
-          currentGroupIndex = this.flatItems[i].groupIndex;
+          currentGroupKey = flat._groupKey;
+          currentGroupIndex = flat.groupIndex;
+          currentGroupData = flat.data;
         } else {
           nextHeaderOffset = headerOffset;
           break;
@@ -288,15 +449,22 @@ class VirtualList {
       }
     }
 
-    if (currentGroupIndex >= 0) {
-      const group = this.data[currentGroupIndex];
-      const headerEl = stickyRender(group.group, currentGroupIndex);
+    if (currentGroupKey !== this.currentStickyGroupKey && this.options.onStickyGroupChange) {
+      this.options.onStickyGroupChange(currentGroupKey != null ? {
+        key: currentGroupKey,
+        groupIndex: currentGroupIndex,
+        group: currentGroupData ? currentGroupData.group : null,
+        data: currentGroupData
+      } : null);
+    }
+    this.currentStickyGroupKey = currentGroupKey;
+
+    if (currentGroupKey != null) {
+      const headerEl = stickyRender(currentGroupData ? currentGroupData.group : null, currentGroupIndex, currentGroupData);
       this.stickyHeader.innerHTML = '';
-      if (headerEl) {
-        if (headerEl instanceof HTMLElement) {
-          headerEl.style.pointerEvents = 'auto';
-          this.stickyHeader.appendChild(headerEl);
-        }
+      if (headerEl && headerEl instanceof HTMLElement) {
+        headerEl.style.pointerEvents = 'auto';
+        this.stickyHeader.appendChild(headerEl);
       }
       this.stickyHeader.style.display = 'block';
 
@@ -317,8 +485,7 @@ class VirtualList {
 
     const scrollTop = this.scrollTop;
     const clientHeight = this.container.clientHeight;
-    const scrollHeight = this.scrollContent.offsetHeight;
-    const distanceToBottom = scrollHeight - scrollTop - clientHeight;
+    const distanceToBottom = this.totalHeight - scrollTop - clientHeight;
 
     if (distanceToBottom <= this.options.threshold) {
       this.isLoading = true;
@@ -335,65 +502,176 @@ class VirtualList {
     }
   }
 
+  _mergeGroupsIntoData(existingData, newGroups) {
+    const merged = [...existingData];
+    const groupKeyToIndex = new Map();
+    merged.forEach((g, i) => {
+      const key = this.options.getGroupKey(g);
+      if (key != null) groupKeyToIndex.set(key, i);
+    });
+
+    for (const newGroup of newGroups) {
+      const key = this.options.getGroupKey(newGroup);
+      if (key != null && groupKeyToIndex.has(key)) {
+        const idx = groupKeyToIndex.get(key);
+        merged[idx] = {
+          ...merged[idx],
+          items: [...merged[idx].items, ...newGroup.items]
+        };
+      } else {
+        merged.push(newGroup);
+        if (key != null) {
+          groupKeyToIndex.set(key, merged.length - 1);
+        }
+      }
+    }
+    return merged;
+  }
+
   setData(data) {
+    this._captureAnchor();
     this.data = data || [];
-    this.heights.clear();
     this.flatItems = this._flattenData(this.data);
-    this._updateTotalHeight();
-    this._render();
-    this._updateStickyHeader();
     this.hasMore = true;
     this.isLoading = false;
+    this._updateOffsets();
+    this.scrollContent.style.height = `${this.totalHeight}px`;
+    if (this.anchor && this.options.itemHeight === null) {
+      this._restoreAnchor();
+    }
+    this._scheduleRender();
   }
 
   appendData(data) {
     if (!data || data.length === 0) return;
 
+    this._captureAnchor();
+
     if (this.isGrouped) {
-      this.data = [...this.data, ...data];
+      this.data = this._mergeGroupsIntoData(this.data, data);
     } else {
       this.data = [...this.data, ...data];
     }
 
-    const oldLength = this.flatItems.length;
+    const oldFlatKeys = new Set(this.flatItems.map(f => f._key));
     this.flatItems = this._flattenData(this.data);
 
     if (this.options.itemHeight !== null) {
-      const itemHeight = this.options.itemHeight;
-      for (let i = oldLength; i < this.flatItems.length; i++) {
-        this.heights.set(i, itemHeight);
+      for (let i = 0; i < this.flatItems.length; i++) {
+        const flat = this.flatItems[i];
+        if (!oldFlatKeys.has(flat._key)) {
+          const h = flat.type === 'header' ? this.options.estimatedHeaderHeight : this.options.itemHeight;
+          this.heightsByKey.set(flat._key, h);
+        }
       }
     }
 
-    const oldTotalHeight = this.totalHeight;
     this._updateOffsets();
-
-    const heightDiff = this.totalHeight - oldTotalHeight;
     this.scrollContent.style.height = `${this.totalHeight}px`;
-
-    this._render();
-    this._updateStickyHeader();
+    if (this.anchor && this.options.itemHeight === null) {
+      this._restoreAnchor();
+    }
+    this._scheduleRender();
   }
 
   scrollToIndex(index, behavior = 'auto') {
     if (index < 0 || index >= this.flatItems.length) return;
 
     const offset = this.offsets[index];
+    this._suppressScrollEvent = true;
     this.container.scrollTo({
       top: offset,
       behavior
     });
+    this.scrollTop = offset;
+    this._scheduleUpdate(false);
+  }
+
+  scrollToItem(itemKey, options = {}) {
+    const { behavior = 'auto', align = 'start' } = options;
+    const fullKey = `__item_${itemKey}`;
+    const idx = this.keyToFlatIndex.get(fullKey);
+    if (idx == null) return false;
+
+    let targetTop = this.offsets[idx];
+    if (align === 'center') {
+      targetTop = targetTop - (this.container.clientHeight / 2) + (this._getHeightByKey(fullKey, this.flatItems[idx]) / 2);
+    } else if (align === 'end') {
+      targetTop = targetTop + this._getHeightByKey(fullKey, this.flatItems[idx]) - this.container.clientHeight;
+    }
+    targetTop = Math.max(0, targetTop);
+
+    this._suppressScrollEvent = true;
+    this.container.scrollTo({ top: targetTop, behavior });
+    this.scrollTop = targetTop;
+    this._scheduleUpdate(false);
+    return true;
+  }
+
+  scrollToGroup(groupKey, options = {}) {
+    const { behavior = 'auto' } = options;
+    const fullKey = `__header_${groupKey}`;
+    const idx = this.keyToFlatIndex.get(fullKey);
+    if (idx == null) return false;
+
+    const offset = this.offsets[idx];
+    this._suppressScrollEvent = true;
+    this.container.scrollTo({ top: offset, behavior });
+    this.scrollTop = offset;
+    this._scheduleUpdate(false);
+    return true;
+  }
+
+  getVisibleRange() {
+    const viewportHeight = this.container.clientHeight;
+    const scrollTop = this.scrollTop;
+    const total = this.flatItems.length;
+
+    if (total === 0) {
+      return { startIndex: 0, endIndex: 0, items: [], flatItems: [] };
+    }
+
+    let startIdx = this._binarySearch(scrollTop);
+    let endIdx = this._binarySearch(scrollTop + viewportHeight);
+    startIdx = Math.max(0, startIdx);
+    endIdx = Math.min(total - 1, endIdx);
+
+    const flatInView = this.flatItems.slice(startIdx, endIdx + 1);
+    return {
+      startIndex: startIdx,
+      endIndex: endIdx,
+      items: flatInView.filter(f => f.type === 'item').map(f => f.item),
+      flatItems: flatInView
+    };
+  }
+
+  getCurrentStickyGroup() {
+    if (!this.isGrouped || this.currentStickyGroupKey == null) return null;
+
+    const headerKey = `__header_${this.currentStickyGroupKey}`;
+    const idx = this.keyToFlatIndex.get(headerKey);
+    if (idx == null) return null;
+
+    const flat = this.flatItems[idx];
+    return {
+      key: this.currentStickyGroupKey,
+      groupIndex: flat.groupIndex,
+      group: flat.group,
+      data: flat.data
+    };
   }
 
   refresh() {
-    this.heights.clear();
-    this._updateOffsets();
-    this.scrollContent.style.height = `${this.totalHeight}px`;
-    this._render();
-    this._updateStickyHeader();
+    this._captureAnchor();
+    this.heightsByKey.clear();
+    this._scheduleUpdate(true);
   }
 
   destroy() {
+    if (this._rafId != null) {
+      cancelAnimationFrame(this._rafId);
+      this._rafId = null;
+    }
     this.container.removeEventListener('scroll', this._onScroll);
     if (this.containerResizeObserver) {
       this.containerResizeObserver.disconnect();

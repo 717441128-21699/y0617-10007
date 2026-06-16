@@ -3,608 +3,686 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>高性能虚拟滚动列表演示</title>
+  <title>高性能虚拟滚动列表 - 生产级演示</title>
   <script src="./virtual-list.js"></script>
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
+    * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #f5f5f5;
+      background: #f0f2f5;
       padding: 20px;
-    }
-
-    .container {
-      max-width: 1200px;
-      margin: 0 auto;
-    }
-
-    h1 {
-      text-align: center;
-      margin-bottom: 20px;
       color: #333;
     }
+    .page { max-width: 1400px; margin: 0 auto; }
+    h1 { text-align: center; margin-bottom: 6px; font-size: 24px; }
+    .subtitle { text-align: center; color: #888; font-size: 13px; margin-bottom: 20px; }
 
     .tabs {
-      display: flex;
-      gap: 10px;
-      margin-bottom: 20px;
-      justify-content: center;
-      flex-wrap: wrap;
+      display: flex; gap: 8px; margin-bottom: 16px; justify-content: center; flex-wrap: wrap;
     }
-
     .tab-btn {
-      padding: 10px 20px;
-      border: 2px solid #4a90d9;
-      background: white;
-      color: #4a90d9;
-      border-radius: 8px;
-      cursor: pointer;
-      font-size: 14px;
-      transition: all 0.2s;
+      padding: 10px 18px; border: 2px solid #4a6cf7; background: white; color: #4a6cf7;
+      border-radius: 10px; cursor: pointer; font-size: 14px; transition: all 0.2s; font-weight: 500;
     }
+    .tab-btn.active { background: #4a6cf7; color: white; box-shadow: 0 2px 10px rgba(74,108,247,0.3); }
+    .tab-btn:hover:not(.active) { background: #eef2ff; }
 
-    .tab-btn.active {
-      background: #4a90d9;
-      color: white;
-    }
-
-    .tab-btn:hover:not(.active) {
-      background: #e8f4fd;
-    }
-
-    .demo-section {
+    .panel {
       display: none;
       background: white;
-      border-radius: 12px;
-      padding: 20px;
-      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+      border-radius: 14px;
+      padding: 18px;
+      box-shadow: 0 2px 16px rgba(0,0,0,0.06);
     }
+    .panel.active { display: block; }
 
-    .demo-section.active {
-      display: block;
+    .toolbar {
+      display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center;
     }
-
-    .info-bar {
-      display: flex;
-      gap: 20px;
-      margin-bottom: 15px;
-      padding: 12px;
-      background: #f0f7ff;
-      border-radius: 8px;
-      font-size: 14px;
-      flex-wrap: wrap;
+    .toolbar .sep { width: 1px; height: 24px; background: #e5e5e5; margin: 0 4px; }
+    .btn {
+      padding: 7px 14px; background: #4a6cf7; color: white; border: none; border-radius: 7px;
+      cursor: pointer; font-size: 13px; transition: background 0.15s;
     }
-
-    .info-item {
-      display: flex;
-      align-items: center;
-      gap: 6px;
+    .btn:hover { background: #3a57d4; }
+    .btn.secondary { background: #f2f3f7; color: #333; }
+    .btn.secondary:hover { background: #e4e6ee; }
+    .btn.danger { background: #ef4444; }
+    .btn.danger:hover { background: #dc2626; }
+    .btn:disabled { background: #c9cfdb; cursor: not-allowed; }
+    input[type="text"], input[type="number"] {
+      padding: 7px 10px; border: 1px solid #d5d8e0; border-radius: 7px; font-size: 13px; width: 120px;
     }
-
-    .info-label {
-      color: #666;
-    }
-
-    .info-value {
-      color: #4a90d9;
-      font-weight: 600;
-    }
-
-    .list-container {
-      height: 500px;
-      border: 1px solid #e0e0e0;
-      border-radius: 8px;
-      overflow: hidden;
-    }
-
-    .list-item {
-      padding: 12px 16px;
-      border-bottom: 1px solid #f0f0f0;
+    select {
+      padding: 7px 10px; border: 1px solid #d5d8e0; border-radius: 7px; font-size: 13px;
       background: white;
-      transition: background 0.2s;
     }
 
-    .list-item:hover {
-      background: #f9f9f9;
+    .stats {
+      display: flex; gap: 18px; margin-bottom: 12px; padding: 10px 14px; background: #f7f9ff;
+      border-radius: 8px; font-size: 13px; flex-wrap: wrap;
+    }
+    .stat b { color: #4a6cf7; margin-left: 4px; }
+
+    .list-wrapper {
+      height: 520px; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden;
+      background: white;
     }
 
-    .item-title {
-      font-size: 15px;
-      font-weight: 500;
-      color: #333;
-      margin-bottom: 4px;
-    }
-
-    .item-desc {
-      font-size: 13px;
-      color: #888;
-    }
-
-    .item-index {
-      display: inline-block;
-      background: #4a90d9;
-      color: white;
-      padding: 2px 8px;
-      border-radius: 4px;
-      font-size: 12px;
-      margin-right: 8px;
-    }
-
-    .dynamic-height .item-desc {
-      display: block;
-    }
-
-    .group-header {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
+    /* 列表项样式 */
+    .vl-item {
       padding: 12px 16px;
-      font-weight: 600;
-      font-size: 14px;
+      border-bottom: 1px solid #f0f1f5;
+      background: white;
+      display: flex; gap: 12px; align-items: flex-start;
     }
-
-    .sticky-header {
+    .vl-item:hover { background: #fafbff; }
+    .vl-avatar {
+      width: 40px; height: 40px; border-radius: 50%;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      padding: 12px 16px;
-      font-weight: 600;
-      font-size: 14px;
-      width: 100%;
+      display: flex; align-items: center; justify-content: center;
+      color: white; font-weight: 600; font-size: 15px; flex-shrink: 0;
+    }
+    .vl-avatar.avatar-2 { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+    .vl-avatar.avatar-3 { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+    .vl-avatar.avatar-4 { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }
+    .vl-body { flex: 1; min-width: 0; }
+    .vl-title { font-size: 14px; font-weight: 500; margin-bottom: 3px; }
+    .vl-title .idx-tag {
+      display: inline-block; background: #eef2ff; color: #4a6cf7; padding: 1px 7px;
+      border-radius: 4px; font-size: 11px; margin-right: 6px; font-weight: 600;
+    }
+    .vl-desc { font-size: 12px; color: #777; line-height: 1.5; }
+    .vl-item.highlight { background: #fffbeb; }
+    .vl-item.highlight .vl-title { color: #b45309; }
+
+    /* 长文本/动态高度用 */
+    .vl-desc.long { white-space: normal; }
+    .vl-desc img { max-width: 100%; margin-top: 6px; border-radius: 6px; display: block; }
+
+    /* 分组标题 */
+    .vl-group {
+      padding: 10px 16px;
+      background: linear-gradient(90deg, #4a6cf7 0%, #6b86ff 100%);
+      color: white; font-weight: 600; font-size: 13px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .vl-sticky {
+      padding: 10px 16px;
+      background: linear-gradient(90deg, #4a6cf7 0%, #6b86ff 100%);
+      color: white; font-weight: 600; font-size: 13px; width: 100%;
+      display: flex; align-items: center; justify-content: space-between;
+      box-shadow: 0 2px 10px rgba(74,108,247,0.3);
+    }
+    .vl-group .count, .vl-sticky .count {
+      background: rgba(255,255,255,0.25); padding: 2px 8px; border-radius: 10px; font-size: 11px;
     }
 
-    .loading-indicator {
-      text-align: center;
-      padding: 16px;
-      color: #888;
-      font-size: 14px;
+    /* 信息输出区 */
+    .output {
+      margin-top: 12px; padding: 10px 14px; background: #0f172a; color: #a7f3d0;
+      border-radius: 8px; font-family: 'Consolas', monospace; font-size: 12px;
+      max-height: 120px; overflow-y: auto;
     }
+    .output .ts { color: #60a5fa; margin-right: 6px; }
+    .output .tag { color: #fbbf24; margin-right: 6px; }
 
-    .loading-spinner {
-      display: inline-block;
-      width: 16px;
-      height: 16px;
-      border: 2px solid #e0e0e0;
-      border-top-color: #4a90d9;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-      margin-right: 8px;
-      vertical-align: middle;
+    .grid-2 {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
     }
+    @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
 
-    @keyframes spin {
-      to { transform: rotate(360deg); }
+    .side-panel {
+      background: #fafbff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px;
+      max-height: 660px; overflow-y: auto;
     }
-
-    .controls {
-      display: flex;
-      gap: 10px;
-      margin-top: 15px;
-      flex-wrap: wrap;
+    .side-panel h3 { font-size: 14px; margin-bottom: 8px; color: #334155; }
+    .side-panel ul { list-style: none; }
+    .side-panel li {
+      padding: 7px 10px; border-radius: 6px; font-size: 13px; cursor: pointer;
+      display: flex; align-items: center; justify-content: space-between;
     }
-
-    .control-btn {
-      padding: 8px 16px;
-      background: #4a90d9;
-      color: white;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 13px;
-      transition: background 0.2s;
-    }
-
-    .control-btn:hover {
-      background: #3a7bc8;
-    }
-
-    .control-btn:disabled {
-      background: #ccc;
-      cursor: not-allowed;
-    }
-
-    .scroll-input {
-      padding: 8px 12px;
-      border: 1px solid #ddd;
-      border-radius: 6px;
-      font-size: 13px;
-      width: 120px;
-    }
-
-    .avatar {
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: white;
-      font-weight: 600;
-      font-size: 16px;
-      flex-shrink: 0;
-    }
-
-    .item-with-avatar {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .item-content {
-      flex: 1;
-      min-width: 0;
-    }
-
-    .item-content .item-title {
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
+    .side-panel li:hover { background: #eef2ff; }
+    .side-panel li.active { background: #4a6cf7; color: white; }
+    .side-panel li .c { color: #94a3b8; font-size: 11px; }
+    .side-panel li.active .c { color: rgba(255,255,255,0.7); }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>🚀 高性能虚拟滚动列表</h1>
+<div class="page">
+  <h1>🚀 高性能虚拟滚动列表 - 生产级演示</h1>
+  <div class="subtitle">支持 key 保持位置 · 动态行高(ResizeObserver+图片) · 分组吸附合并 · 滚动控制API</div>
 
-    <div class="tabs">
-      <button class="tab-btn active" data-tab="fixed">固定行高 (10万条)</button>
-      <button class="tab-btn" data-tab="dynamic">动态行高</button>
-      <button class="tab-btn" data-tab="grouped">分组展示 + 吸顶</button>
-      <button class="tab-btn" data-tab="infinite">无限滚动加载</button>
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="tab-anchor">① 按 Key 保持滚动位置</button>
+    <button class="tab-btn" data-tab="tab-dynamic">② 动态行高稳定性</button>
+    <button class="tab-btn" data-tab="tab-control">③ 滚动控制 API</button>
+    <button class="tab-btn" data-tab="tab-group">④ 分组吸附 + 合并追加</button>
+  </div>
+
+  <!-- ① 按 Key 保持滚动位置 -->
+  <div id="tab-anchor" class="panel active">
+    <div class="toolbar">
+      <button class="btn" onclick="anchorDemo.prependData()">在前面插入 50 条</button>
+      <button class="btn" onclick="anchorDemo.appendData()">在后面追加 50 条</button>
+      <button class="btn secondary" onclick="anchorDemo.shuffleAndReload()">随机打乱并重载</button>
+      <button class="btn danger" onclick="anchorDemo.refresh()">调用 refresh()</button>
+      <div class="sep"></div>
+      <button class="btn secondary" onclick="anchorDemo.jumpMiddle()">跳到第 500 条锚定</button>
     </div>
-
-    <div id="fixed" class="demo-section active">
-      <div class="info-bar">
-        <div class="info-item">
-          <span class="info-label">总数据量:</span>
-          <span class="info-value" id="fixed-count">0</span> 条
-        </div>
-        <div class="info-item">
-          <span class="info-label">实际渲染:</span>
-          <span class="info-value" id="fixed-rendered">0</span> 个 DOM
-        </div>
-        <div class="info-item">
-          <span class="info-label">行高:</span>
-          <span class="info-value">固定 60px</span>
-        </div>
-      </div>
-      <div class="list-container" id="fixed-list"></div>
-      <div class="controls">
-        <input type="number" class="scroll-input" id="fixed-scroll-input" placeholder="输入索引" min="0">
-        <button class="control-btn" onclick="scrollToFixedIndex()">滚动到索引</button>
-        <button class="control-btn" onclick="refreshFixedList()">刷新列表</button>
-      </div>
+    <div class="stats">
+      <div class="stat">当前总条数:<b id="anchor-stat-total">0</b></div>
+      <div class="stat">渲染的 DOM 数:<b id="anchor-stat-rendered">0</b></div>
+      <div class="stat">锚定 Item Key:<b id="anchor-stat-key">-</b></div>
     </div>
+    <div class="list-wrapper" id="anchor-list"></div>
+    <div class="output" id="anchor-output"></div>
+  </div>
 
-    <div id="dynamic" class="demo-section">
-      <div class="info-bar">
-        <div class="info-item">
-          <span class="info-label">总数据量:</span>
-          <span class="info-value" id="dynamic-count">0</span> 条
-        </div>
-        <div class="info-item">
-          <span class="info-label">实际渲染:</span>
-          <span class="info-value" id="dynamic-rendered">0</span> 个 DOM
-        </div>
-        <div class="info-item">
-          <span class="info-label">行高:</span>
-          <span class="info-value">动态 (ResizeObserver)</span>
-        </div>
-      </div>
-      <div class="list-container dynamic-height" id="dynamic-list"></div>
+  <!-- ② 动态行高稳定性 -->
+  <div id="tab-dynamic" class="panel">
+    <div class="toolbar">
+      <button class="btn" onclick="dynamicDemo.toggleImages()">切换图片显隐</button>
+      <button class="btn" onclick="dynamicDemo.addLongText()">追加含长文本的数据</button>
+      <button class="btn secondary" onclick="dynamicDemo.refresh()">重新测量高度</button>
+      <div class="sep"></div>
+      <span style="font-size:12px;color:#666;">提示：滚动查看项重叠/底部空白是否出现</span>
     </div>
-
-    <div id="grouped" class="demo-section">
-      <div class="info-bar">
-        <div class="info-item">
-          <span class="info-label">分组数:</span>
-          <span class="info-value" id="grouped-groups">0</span> 组
-        </div>
-        <div class="info-item">
-          <span class="info-label">总数据量:</span>
-          <span class="info-value" id="grouped-count">0</span> 条
-        </div>
-        <div class="info-item">
-          <span class="info-label">当前分组:</span>
-          <span class="info-value" id="grouped-current">-</span>
-        </div>
-      </div>
-      <div class="list-container" id="grouped-list"></div>
+    <div class="stats">
+      <div class="stat">总条数:<b id="dynamic-stat-total">0</b></div>
+      <div class="stat">预估总高:<b id="dynamic-stat-estimated">0</b>px</div>
+      <div class="stat">实际总高:<b id="dynamic-stat-real">0</b>px</div>
+      <div class="stat">已测量项:<b id="dynamic-stat-measured">0</b></div>
     </div>
+    <div class="list-wrapper" id="dynamic-list"></div>
+  </div>
 
-    <div id="infinite" class="demo-section">
-      <div class="info-bar">
-        <div class="info-item">
-          <span class="info-label">已加载:</span>
-          <span class="info-value" id="infinite-count">0</span> 条
+  <!-- ③ 滚动控制 API -->
+  <div id="tab-control" class="panel">
+    <div class="grid-2">
+      <div>
+        <div class="toolbar">
+          <input type="number" id="ctrl-item-input" placeholder="Item ID (0-9999)" min="0" max="9999">
+          <select id="ctrl-align">
+            <option value="start">对齐顶部</option>
+            <option value="center">居中</option>
+            <option value="end">对齐底部</option>
+          </select>
+          <button class="btn" onclick="controlDemo.scrollToItem()">scrollToItem</button>
         </div>
-        <div class="info-item">
-          <span class="info-label">加载状态:</span>
-          <span class="info-value" id="infinite-status">就绪</span>
+        <div class="stats">
+          <div class="stat">可见起始ID:<b id="ctrl-stat-start">-</b></div>
+          <div class="stat">可见结束ID:<b id="ctrl-stat-end">-</b></div>
+          <div class="stat">可见条数:<b id="ctrl-stat-count">0</b></div>
         </div>
-        <div class="info-item">
-          <span class="info-label">触发阈值:</span>
-          <span class="info-value">200px</span>
-        </div>
+        <div class="list-wrapper" id="control-list"></div>
       </div>
-      <div class="list-container" id="infinite-list"></div>
+      <div class="side-panel">
+        <h3>📋 实时可见范围 (onVisibleRangeChange)</h3>
+        <ul id="ctrl-visible-list"></ul>
+      </div>
     </div>
   </div>
 
-  <script>
-    let fixedList, dynamicList, groupedList, infiniteList;
-    let infinitePage = 0;
-    const PAGE_SIZE = 100;
-    const MAX_PAGES = 100;
-
-    function generateData(count, startIndex = 0) {
-      const data = [];
-      for (let i = 0; i < count; i++) {
-        const idx = startIndex + i;
-        data.push({
-          id: idx,
-          title: `项目 ${idx + 1}`,
-          desc: `这是第 ${idx + 1} 条数据的描述信息，用于展示虚拟滚动的效果。`,
-          avatar: String.fromCharCode(65 + (idx % 26))
-        });
-      }
-      return data;
-    }
-
-    function generateGroupedData(groupCount, itemsPerGroup) {
-      const data = [];
-      for (let g = 0; g < groupCount; g++) {
-        const group = {
-          group: `第 ${g + 1} 组`,
-          items: []
-        };
-        for (let i = 0; i < itemsPerGroup; i++) {
-          group.items.push({
-            id: g * itemsPerGroup + i,
-            title: `项目 ${g * itemsPerGroup + i + 1}`,
-            desc: `属于第 ${g + 1} 组的第 ${i + 1} 个项目`
-          });
-        }
-        data.push(group);
-      }
-      return data;
-    }
-
-    function generateDynamicData(count) {
-      const data = [];
-      const descriptions = [
-        '简短描述',
-        '这是一段中等长度的描述文字，用于展示不同行高的效果。',
-        '这是一段非常长的描述文字，用于测试动态行高功能。它包含了更多的内容，会占据更多的垂直空间，展示ResizeObserver如何准确测量每一行的实际高度。',
-        '另一段描述',
-        '中等长度的描述内容，展示虚拟滚动的灵活性。'
-      ];
-      for (let i = 0; i < count; i++) {
-        data.push({
-          id: i,
-          title: `项目 ${i + 1}`,
-          desc: descriptions[i % descriptions.length]
-        });
-      }
-      return data;
-    }
-
-    function renderFixedItem({ item, index }) {
-      const div = document.createElement('div');
-      div.className = 'list-item item-with-avatar';
-      div.innerHTML = `
-        <div class="avatar">${item.avatar}</div>
-        <div class="item-content">
-          <div class="item-title"><span class="item-index">${index}</span>${item.title}</div>
-          <div class="item-desc">${item.desc}</div>
+  <!-- ④ 分组吸附 + 合并追加 -->
+  <div id="tab-group" class="panel">
+    <div class="grid-2">
+      <div>
+        <div class="toolbar">
+          <button class="btn" onclick="groupDemo.appendNewGroup()">追加新分组</button>
+          <button class="btn secondary" onclick="groupDemo.appendToExistingGroup()">追加到「已有分组 G-1」</button>
+          <button class="btn" onclick="groupDemo.appendMixed()">混合追加(含新+已有)</button>
         </div>
-      `;
-      return div;
+        <div class="stats">
+          <div class="stat">分组数:<b id="group-stat-groups">0</b></div>
+          <div class="stat">总条数:<b id="group-stat-items">0</b></div>
+          <div class="stat">当前吸顶分组:<b id="group-stat-sticky">-</b></div>
+        </div>
+        <div class="list-wrapper" id="group-list"></div>
+      </div>
+      <div class="side-panel">
+        <h3>📂 目录 (点击跳转到分组)</h3>
+        <ul id="group-catalog"></ul>
+        <h3 style="margin-top:14px;">📊 事件日志</h3>
+        <div class="output" id="group-output" style="max-height:180px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---------- 通用工具 ---------- */
+function logOutput(elId, tag, msg) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  const now = new Date();
+  const ts = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}.${now.getMilliseconds().toString().padStart(3,'0')}`;
+  const div = document.createElement('div');
+  div.innerHTML = `<span class="ts">[${ts}]</span><span class="tag">[${tag}]</span>${msg}`;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+  while (el.childNodes.length > 50) el.removeChild(el.firstChild);
+}
+let ID_SEED = 0;
+function nextId(prefix) { return `${prefix}-${++ID_SEED}`; }
+
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(btn.dataset.tab).classList.add('active');
+  });
+});
+
+/* ---------- 通用:渲染列表项 ---------- */
+function avatarFor(id) {
+  const palette = ['', 'avatar-2', 'avatar-3', 'avatar-4'];
+  const ch = String.fromCharCode(65 + (parseInt(id) % 26));
+  const cls = palette[parseInt(id) % palette.length];
+  return `<div class="vl-avatar ${cls}">${ch}</div>`;
+}
+function renderSimpleItem({ item, index, key }, highlightId) {
+  const div = document.createElement('div');
+  div.className = 'vl-item' + (highlightId != null && item.id === highlightId ? ' highlight' : '');
+  div.innerHTML = `
+    ${avatarFor(item.id)}
+    <div class="vl-body">
+      <div class="vl-title"><span class="idx-tag">${index != null ? index : ''}</span>${item.title}</div>
+      <div class="vl-desc">id=${item.id} · ${item.desc}</div>
+    </div>
+  `;
+  return div;
+}
+
+/* ==========================================================
+ * ① 按 Key 保持滚动位置 Demo
+ * ========================================================== */
+const anchorDemo = (() => {
+  let list;
+  let data = [];
+  let anchoredKey = null;
+
+  function gen(n, startId = 0) {
+    const arr = [];
+    for (let i = 0; i < n; i++) {
+      const id = startId + i;
+      arr.push({ id, title: `数据项 #${id}`, desc: `这是第 ${id} 项,用于验证按 key 保持滚动位置。` });
     }
+    return arr;
+  }
 
-    function renderDynamicItem({ item, index }) {
-      const div = document.createElement('div');
-      div.className = 'list-item';
-      div.innerHTML = `
-        <div class="item-title"><span class="item-index">${index}</span>${item.title}</div>
-        <div class="item-desc">${item.desc}</div>
-      `;
-      return div;
-    }
-
-    function renderGroupItem({ item, groupIndex, itemIndex, group }) {
-      const div = document.createElement('div');
-      div.className = 'list-item';
-      div.innerHTML = `
-        <div class="item-title"><span class="item-index">${groupIndex}-${itemIndex}</span>${item.title}</div>
-        <div class="item-desc">${item.desc}</div>
-      `;
-      return div;
-    }
-
-    function renderGroupHeader(group, groupIndex) {
-      const div = document.createElement('div');
-      div.className = 'group-header';
-      div.innerHTML = `📁 ${group} (第 ${groupIndex + 1} 组)`;
-      return div;
-    }
-
-    function renderStickyHeader(group, groupIndex) {
-      const div = document.createElement('div');
-      div.className = 'sticky-header';
-      div.innerHTML = `📁 ${group} (第 ${groupIndex + 1} 组) - 已置顶`;
-      return div;
-    }
-
-    function initFixedList() {
-      const container = document.getElementById('fixed-list');
-      const data = generateData(100000);
-
-      document.getElementById('fixed-count').textContent = data.length.toLocaleString();
-
-      fixedList = new VirtualList(container, {
-        itemHeight: 64,
-        buffer: 10,
-        renderItem: renderFixedItem,
-        onScroll: (info) => {
-          document.getElementById('fixed-rendered').textContent =
-            (info.visibleEndIndex - info.visibleStartIndex).toString();
-        }
-      });
-
-      fixedList.setData(data);
-
-      const originalRender = fixedList._render.bind(fixedList);
-      fixedList._render = function() {
-        originalRender();
-        document.getElementById('fixed-rendered').textContent =
-          (this.visibleEndIndex - this.visibleStartIndex).toString();
-      }.bind(fixedList);
-    }
-
-    function initDynamicList() {
-      const container = document.getElementById('dynamic-list');
-      const data = generateDynamicData(10000);
-
-      document.getElementById('dynamic-count').textContent = data.length.toLocaleString();
-
-      dynamicList = new VirtualList(container, {
-        estimatedItemHeight: 60,
-        buffer: 5,
-        renderItem: renderDynamicItem
-      });
-
-      dynamicList.setData(data);
-
-      const originalRender = dynamicList._render.bind(dynamicList);
-      dynamicList._render = function() {
-        originalRender();
-        document.getElementById('dynamic-rendered').textContent =
-          (this.visibleEndIndex - this.visibleStartIndex).toString();
-      }.bind(dynamicList);
-    }
-
-    function initGroupedList() {
-      const container = document.getElementById('grouped-list');
-      const data = generateGroupedData(100, 100);
-
-      document.getElementById('grouped-groups').textContent = data.length.toString();
-      document.getElementById('grouped-count').textContent = (data.length * 100).toLocaleString();
-
-      groupedList = new VirtualList(container, {
-        itemHeight: 56,
-        buffer: 8,
-        renderItem: renderGroupItem,
-        renderGroupHeader: renderStickyHeader
-      });
-
-      groupedList.setData(data);
-
-      const originalUpdateSticky = groupedList._updateStickyHeader.bind(groupedList);
-      groupedList._updateStickyHeader = function() {
-        originalUpdateSticky();
-        const scrollTop = this.scrollTop;
-        let currentGroup = '-';
-        for (let i = 0; i < this.flatItems.length; i++) {
-          if (this.flatItems[i].type === 'header' && this.offsets[i] <= scrollTop) {
-            currentGroup = this.flatItems[i].group;
-          }
-        }
-        document.getElementById('grouped-current').textContent = currentGroup;
-      }.bind(groupedList);
-    }
-
-    function initInfiniteList() {
-      const container = document.getElementById('infinite-list');
-      infinitePage = 0;
-
-      infiniteList = new VirtualList(container, {
-        itemHeight: 64,
-        buffer: 10,
-        threshold: 200,
-        renderItem: function({ item, index }) {
-          if (item.isLoading) {
-            const div = document.createElement('div');
-            div.className = 'loading-indicator';
-            div.innerHTML = '<span class="loading-spinner"></span>加载中...';
-            return div;
-          }
-          const div = document.createElement('div');
-          div.className = 'list-item item-with-avatar';
-          div.innerHTML = `
-            <div class="avatar">${item.avatar}</div>
-            <div class="item-content">
-              <div class="item-title"><span class="item-index">${index}</span>${item.title}</div>
-              <div class="item-desc">${item.desc}</div>
-            </div>
-          `;
-          return div;
-        },
-        onLoadMore: async function() {
-          if (infinitePage >= MAX_PAGES) {
-            document.getElementById('infinite-status').textContent = '已加载全部';
-            return false;
-          }
-
-          document.getElementById('infinite-status').textContent = '加载中...';
-
-          await new Promise(resolve => setTimeout(resolve, 800));
-
-          infinitePage++;
-          const newData = generateData(PAGE_SIZE, (infinitePage - 1) * PAGE_SIZE);
-
-          if (infinitePage === 1) {
-            infiniteList.setData(newData);
-          } else {
-            infiniteList.appendData(newData);
-          }
-
-          document.getElementById('infinite-count').textContent =
-            (infinitePage * PAGE_SIZE).toLocaleString();
-          document.getElementById('infinite-status').textContent = '就绪';
-
-          if (infinitePage >= MAX_PAGES) {
-            document.getElementById('infinite-status').textContent = '已加载全部';
-            return false;
-          }
-          return true;
-        }
-      });
-
-      infiniteList.options.onLoadMore();
-    }
-
-    function scrollToFixedIndex() {
-      const input = document.getElementById('fixed-scroll-input');
-      const index = parseInt(input.value);
-      if (!isNaN(index) && index >= 0) {
-        fixedList.scrollToIndex(index, 'smooth');
+  function init() {
+    data = gen(5000, 1000);
+    const container = document.getElementById('anchor-list');
+    list = new VirtualList(container, {
+      itemHeight: 64,
+      buffer: 8,
+      getItemKey: item => item.id,
+      renderItem: (ctx, i) => renderSimpleItem(ctx, anchoredKey),
+      onVisibleRangeChange: (r) => {
+        document.getElementById('anchor-stat-rendered').textContent = (r.endIndex - r.startIndex);
       }
-    }
+    });
+    list.setData(data);
+    updateStat();
+    list.container.scrollTop = 320 * 64; // 滚到大约中间
+    logOutput('anchor-output', 'INIT', `初始加载 ${data.length} 条,已滚动到中间位置`);
+  }
 
-    function refreshFixedList() {
-      fixedList.refresh();
-    }
+  function updateStat() {
+    document.getElementById('anchor-stat-total').textContent = data.length.toLocaleString();
+    document.getElementById('anchor-stat-key').textContent = anchoredKey != null ? anchoredKey : '-';
+  }
 
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        document.querySelectorAll('.demo-section').forEach(s => s.classList.remove('active'));
-        btn.classList.add('active');
-        document.getElementById(btn.dataset.tab).classList.add('active');
+  function rememberAnchor() {
+    const range = list.getVisibleRange();
+    if (range.items.length > 0) {
+      anchoredKey = range.items[0].id;
+      updateStat();
+    }
+  }
+
+  function prependData() {
+    rememberAnchor();
+    const minId = Math.min(...data.map(d => d.id));
+    const add = gen(50, minId - 50);
+    data = [...add, ...data];
+    list.setData(data);
+    updateStat();
+    logOutput('anchor-output', 'PREPEND', `在前面插入 50 条(id ${add[0].id}~${add[add.length-1].id}),锚定 key=${anchoredKey}`);
+  }
+
+  function appendData() {
+    rememberAnchor();
+    const maxId = Math.max(...data.map(d => d.id));
+    const add = gen(50, maxId + 1);
+    data = [...data, ...add];
+    list.appendData(add);
+    updateStat();
+    logOutput('anchor-output', 'APPEND', `在后面追加 50 条(id ${add[0].id}~${add[add.length-1].id}),锚定 key=${anchoredKey}`);
+  }
+
+  function shuffleAndReload() {
+    rememberAnchor();
+    // 复制一份加乱序标记
+    data = [...data].sort(() => Math.random() - 0.5);
+    list.setData(data);
+    updateStat();
+    logOutput('anchor-output', 'SHUFFLE', `数据已打乱顺序,仍保持在 key=${anchoredKey} 附近`);
+  }
+
+  function refresh() {
+    rememberAnchor();
+    list.refresh();
+    logOutput('anchor-output', 'REFRESH', '调用了 refresh() 清空高度缓存');
+  }
+
+  function jumpMiddle() {
+    const targetId = data[500] ? data[500].id : null;
+    if (targetId != null) {
+      anchoredKey = targetId;
+      updateStat();
+      list.scrollToItem(targetId, { align: 'start', behavior: 'smooth' });
+      logOutput('anchor-output', 'SCROLL', `滚动到 item id=${targetId} 并锚定`);
+    }
+  }
+
+  window.addEventListener('DOMContentLoaded', init);
+  return { prependData, appendData, shuffleAndReload, refresh, jumpMiddle };
+})();
+
+/* ==========================================================
+ * ② 动态行高稳定性 Demo
+ * ========================================================== */
+const dynamicDemo = (() => {
+  let list;
+  let showImages = true;
+  let startIdForAppend = 0;
+
+  const SHORT_DESCS = ['简短描述', '一行内容'];
+  const LONG_DESCS = [
+    '这是一段中等长度的描述文字,用于展示不同行高的效果,ResizeObserver会测量实际高度。',
+    '这是一段非常长的描述文字。它用于测试动态行高功能,包含了更多的内容,会占据更多的垂直空间。通过这个长文本,可以验证ResizeObserver是否准确测量每一行的实际高度,同时验证底部是否出现空白、项之间是否出现重叠。'
+  ];
+
+  function genData(n) {
+    const arr = [];
+    for (let i = 0; i < n; i++) {
+      const id = startIdForAppend++;
+      const useLong = i % 3 === 0;
+      const pool = useLong ? LONG_DESCS : SHORT_DESCS;
+      const desc = pool[i % pool.length];
+      arr.push({ id, title: `动态项 #${id}`, desc, hasImage: (i % 4 === 0) });
+    }
+    return arr;
+  }
+
+  function renderDynamic({ item, index }) {
+    const div = document.createElement('div');
+    div.className = 'vl-item';
+    let imgHtml = '';
+    if (item.hasImage && showImages) {
+      // 使用占位图服务,模拟真实图片加载后高度变化
+      const w = 320, h = 80 + (item.id % 5) * 30;
+      imgHtml = `<img src="https://picsum.photos/seed/vl${item.id}/${w}/${h}" alt="" style="width:${w}px;height:auto;"/>`;
+    }
+    div.innerHTML = `
+      ${avatarFor(item.id)}
+      <div class="vl-body">
+        <div class="vl-title"><span class="idx-tag">${index}</span>${item.title}</div>
+        <div class="vl-desc long">${item.desc}${imgHtml}</div>
+      </div>
+    `;
+    return div;
+  }
+
+  function init() {
+    const data = genData(2000);
+    const container = document.getElementById('dynamic-list');
+    list = new VirtualList(container, {
+      estimatedItemHeight: 70,
+      estimatedHeaderHeight: 40,
+      buffer: 5,
+      getItemKey: item => item.id,
+      renderItem: renderDynamic,
+      onVisibleRangeChange: () => updateStats()
+    });
+    list.setData(data);
+    updateStats();
+  }
+
+  function updateStats() {
+    if (!list) return;
+    document.getElementById('dynamic-stat-total').textContent = list.data.length.toLocaleString();
+    // 预估 vs 实际
+    const estimated = list.flatItems.length * 70;
+    const real = list.totalHeight;
+    document.getElementById('dynamic-stat-estimated').textContent = estimated.toLocaleString();
+    document.getElementById('dynamic-stat-real').textContent = real.toLocaleString();
+    document.getElementById('dynamic-stat-measured').textContent = list.heightsByKey.size.toLocaleString();
+  }
+
+  function toggleImages() {
+    showImages = !showImages;
+    list.refresh();
+    setTimeout(updateStats, 500);
+  }
+
+  function addLongText() {
+    const add = [];
+    for (let i = 0; i < 100; i++) {
+      const id = startIdForAppend++;
+      add.push({
+        id, title: `追加项 #${id}`,
+        desc: LONG_DESCS[i % LONG_DESCS.length],
+        hasImage: (i % 3 === 0)
       });
-    });
+    }
+    list.appendData(add);
+    setTimeout(updateStats, 500);
+  }
 
-    window.addEventListener('DOMContentLoaded', () => {
-      initFixedList();
-      initDynamicList();
-      initGroupedList();
-      initInfiniteList();
+  function refresh() {
+    list.refresh();
+    setTimeout(updateStats, 300);
+  }
+
+  window.addEventListener('DOMContentLoaded', init);
+  return { toggleImages, addLongText, refresh };
+})();
+
+/* ==========================================================
+ * ③ 滚动控制 API Demo
+ * ========================================================== */
+const controlDemo = (() => {
+  let list;
+
+  function init() {
+    const data = [];
+    for (let i = 0; i < 10000; i++) {
+      data.push({ id: i, title: `控制项 #${i}`, desc: `这是 id=${i} 的数据项` });
+    }
+    const container = document.getElementById('control-list');
+    list = new VirtualList(container, {
+      itemHeight: 64,
+      buffer: 8,
+      getItemKey: item => item.id,
+      renderItem: (ctx) => renderSimpleItem(ctx),
+      onVisibleRangeChange: (r) => {
+        document.getElementById('ctrl-stat-count').textContent = r.items.length;
+        document.getElementById('ctrl-stat-start').textContent = r.items.length > 0 ? r.items[0].id : '-';
+        document.getElementById('ctrl-stat-end').textContent = r.items.length > 0 ? r.items[r.items.length - 1].id : '-';
+        // 更新右侧可见列表
+        const ul = document.getElementById('ctrl-visible-list');
+        ul.innerHTML = '';
+        r.items.slice(0, 30).forEach(item => {
+          const li = document.createElement('li');
+          li.innerHTML = `<span>Item #${item.id}</span><span class="c">${item.title.split(' ')[0]}</span>`;
+          ul.appendChild(li);
+        });
+        if (r.items.length > 30) {
+          const more = document.createElement('li');
+          more.innerHTML = `<span>...还有 ${r.items.length - 30} 条</span>`;
+          ul.appendChild(more);
+        }
+      }
     });
-  </script>
+    list.setData(data);
+  }
+
+  function scrollToItem() {
+    const input = document.getElementById('ctrl-item-input');
+    const align = document.getElementById('ctrl-align').value;
+    const id = parseInt(input.value);
+    if (isNaN(id)) return;
+    const ok = list.scrollToItem(id, { behavior: 'smooth', align });
+    if (!ok) alert(`未找到 id=${id} 的数据项`);
+  }
+
+  window.addEventListener('DOMContentLoaded', init);
+  return { scrollToItem };
+})();
+
+/* ==========================================================
+ * ④ 分组吸附 + 合并追加 Demo
+ * ========================================================== */
+const groupDemo = (() => {
+  let list;
+  let groupSeq = 0;
+
+  function makeGroup(groupKey, title, itemCount, startId = 0) {
+    const items = [];
+    for (let i = 0; i < itemCount; i++) {
+      items.push({ id: `${groupKey}-${startId + i}`, title: `子项 ${startId + i + 1}`, desc: `属于分组 ${title}` });
+    }
+    return { groupKey, group: title, items };
+  }
+
+  function genInitialData() {
+    const arr = [];
+    for (let g = 0; g < 10; g++) {
+      groupSeq++;
+      arr.push(makeGroup(`G-${g + 1}`, `分组 ${g + 1} (G-${g + 1})`, 20, 1));
+    }
+    return arr;
+  }
+
+  function renderGroupHeader(group, groupIndex, groupData) {
+    const div = document.createElement('div');
+    div.className = 'vl-group';
+    div.innerHTML = `<span>📁 ${group}</span><span class="count">${groupData.items.length} 项</span>`;
+    return div;
+  }
+  function renderSticky(group, groupIndex, groupData) {
+    const div = document.createElement('div');
+    div.className = 'vl-sticky';
+    div.innerHTML = `<span>📌 ${group} - 吸顶中</span><span class="count">${groupData.items.length} 项</span>`;
+    return div;
+  }
+  function renderGroupItem({ item, groupIndex, itemIndex, group, key }) {
+    const div = document.createElement('div');
+    div.className = 'vl-item';
+    div.innerHTML = `
+      ${avatarFor(itemIndex)}
+      <div class="vl-body">
+        <div class="vl-title"><span class="idx-tag">${groupIndex}-${itemIndex}</span>${item.title}</div>
+        <div class="vl-desc">itemKey=${key} · ${item.desc}</div>
+      </div>
+    `;
+    return div;
+  }
+
+  function updateStats() {
+    if (!list) return;
+    document.getElementById('group-stat-groups').textContent = list.data.length;
+    const totalItems = list.data.reduce((s, g) => s + g.items.length, 0);
+    document.getElementById('group-stat-items').textContent = totalItems;
+    const sticky = list.getCurrentStickyGroup();
+    document.getElementById('group-stat-sticky').textContent = sticky ? sticky.key : '-';
+
+    // 更新目录
+    const ul = document.getElementById('group-catalog');
+    ul.innerHTML = '';
+    list.data.forEach(g => {
+      const li = document.createElement('li');
+      li.innerHTML = `<span>${g.group}</span><span class="c">${g.items.length}项</span>`;
+      const isActive = sticky && sticky.key === list.options.getGroupKey(g);
+      if (isActive) li.classList.add('active');
+      li.addEventListener('click', () => {
+        list.scrollToGroup(list.options.getGroupKey(g), { behavior: 'smooth' });
+      });
+      ul.appendChild(li);
+    });
+  }
+
+  function init() {
+    const data = genInitialData();
+    const container = document.getElementById('group-list');
+    list = new VirtualList(container, {
+      itemHeight: 64,
+      estimatedHeaderHeight: 44,
+      buffer: 8,
+      getItemKey: item => item.id,
+      getGroupKey: group => group.groupKey,
+      renderItem: renderGroupItem,
+      renderGroupHeader: renderGroupHeader,
+      renderStickyHeader: renderSticky,
+      onStickyGroupChange: (g) => {
+        logOutput('group-output', 'STICKY', g ? `吸顶分组切换为: ${g.key} (${g.group})` : '离开所有分组');
+        updateStats();
+      },
+      onVisibleRangeChange: () => updateStats()
+    });
+    list.setData(data);
+    updateStats();
+    logOutput('group-output', 'INIT', `加载初始数据,共 ${data.length} 个分组`);
+  }
+
+  function appendNewGroup() {
+    groupSeq++;
+    const key = `G-${groupSeq}`;
+    const grp = makeGroup(key, `新分组 ${groupSeq} (${key})`, 15, 1);
+    list.appendData([grp]);
+    updateStats();
+    logOutput('group-output', 'APPEND', `追加新分组 ${key},共 ${grp.items.length} 项`);
+  }
+
+  function appendToExistingGroup() {
+    // 向已有分组 G-1 追加
+    const existing = list.data.find(g => list.options.getGroupKey(g) === 'G-1');
+    if (!existing) return;
+    const startId = existing.items.length + 1;
+    const grp = makeGroup('G-1', existing.group, 10, startId);
+    list.appendData([grp]);
+    updateStats();
+    logOutput('group-output', 'MERGE', `向已有分组 G-1 追加 ${grp.items.length} 项(合并而非新建)`);
+  }
+
+  function appendMixed() {
+    const newGrps = [];
+    // 两个已有分组
+    if (list.data[0]) {
+      const k0 = list.options.getGroupKey(list.data[0]);
+      newGrps.push(makeGroup(k0, list.data[0].group, 5, list.data[0].items.length + 1));
+    }
+    if (list.data[2]) {
+      const k2 = list.options.getGroupKey(list.data[2]);
+      newGrps.push(makeGroup(k2, list.data[2].group, 5, list.data[2].items.length + 1));
+    }
+    // 一个新分组
+    groupSeq++;
+    const key = `G-${groupSeq}`;
+    newGrps.push(makeGroup(key, `新分组 ${groupSeq} (${key})`, 10, 1));
+
+    list.appendData(newGrps);
+    updateStats();
+    logOutput('group-output', 'MIXED', `混合追加:2个已有分组合并 + 1个新分组`);
+  }
+
+  window.addEventListener('DOMContentLoaded', init);
+  return { appendNewGroup, appendToExistingGroup, appendMixed };
+})();
+</script>
 </body>
 </html>
