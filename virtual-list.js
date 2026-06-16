@@ -8,6 +8,9 @@ class VirtualList {
       buffer: 5,
       threshold: 200,
       selectionMode: 'none',
+      defaultSelectedKeys: null,
+      defaultFocusedKey: null,
+      defaultCollapsedGroups: null,
       renderItem: null,
       renderGroupHeader: null,
       renderStickyHeader: null,
@@ -23,6 +26,7 @@ class VirtualList {
     };
 
     this.data = [];
+    this._originalData = null;
     this.flatItems = [];
     this.heightsByKey = new Map();
     this.offsets = [];
@@ -38,10 +42,27 @@ class VirtualList {
     this._suppressScrollEvent = false;
     this._rafId = null;
 
+    this._keyRegistry = new Map();
     this.selectedKeys = new Set();
     this.focusedKey = null;
     this._lastRangeSelectedKey = null;
     this.collapsedGroups = new Set();
+
+    if (this.options.defaultSelectedKeys) {
+      const arr = Array.isArray(this.options.defaultSelectedKeys)
+        ? this.options.defaultSelectedKeys
+        : (this.options.defaultSelectedKeys instanceof Set ? [...this.options.defaultSelectedKeys] : []);
+      this.selectedKeys = new Set(arr.map(k => this._toStrKey(k)));
+    }
+    if (this.options.defaultFocusedKey != null) {
+      this.focusedKey = this._toStrKey(this.options.defaultFocusedKey);
+    }
+    if (this.options.defaultCollapsedGroups) {
+      const arr = Array.isArray(this.options.defaultCollapsedGroups)
+        ? this.options.defaultCollapsedGroups
+        : (this.options.defaultCollapsedGroups instanceof Set ? [...this.options.defaultCollapsedGroups] : []);
+      this.collapsedGroups = new Set(arr.map(k => this._toStrKey(k)));
+    }
 
     this._init();
   }
@@ -57,6 +78,7 @@ class VirtualList {
     this.container.style.position = 'relative';
     this.container.style.willChange = 'transform';
     this.container.setAttribute('tabindex', '0');
+    this.container.style.outline = 'none';
 
     this.scrollContent = document.createElement('div');
     this.scrollContent.style.position = 'relative';
@@ -116,6 +138,13 @@ class VirtualList {
 
     this._onMouseDown = this._onMouseDown.bind(this);
     this.itemsContainer.addEventListener('mousedown', this._onMouseDown);
+    this.stickyHeader.addEventListener('mousedown', (e) => {
+      const target = e.target.closest('[data-group-key]');
+      if (target) {
+        const gk = target.dataset.groupKey;
+        if (gk != null && gk !== '') this.toggleGroupCollapse(gk);
+      }
+    });
   }
 
   _onMouseDown(e) {
@@ -129,9 +158,7 @@ class VirtualList {
       const flatIdx = this.keyToFlatIndex.get(key);
       if (flatIdx != null) {
         const flat = this.flatItems[flatIdx];
-        if (flat && flat.type === 'header') {
-          this.toggleGroupCollapse(flat._groupKey);
-        }
+        if (flat && flat.type === 'header') this.toggleGroupCollapse(flat._groupKey);
       }
       return;
     }
@@ -139,75 +166,203 @@ class VirtualList {
     const itemKey = this._extractItemKeyFromFull(key);
     if (itemKey == null) return;
 
-    if (this.options.selectionMode === 'none') {
-      this._setFocusedItem(itemKey);
-      return;
-    }
+    this._applySelectionByPointer(itemKey, e);
+    this._setFocusedItem(itemKey);
+  }
 
+  _applySelectionByPointer(itemKey, e) {
+    if (this.options.selectionMode === 'none') return;
     if (e.shiftKey && this.options.selectionMode === 'multiple' && this._lastRangeSelectedKey != null) {
       this._selectRange(this._lastRangeSelectedKey, itemKey);
     } else if (e.ctrlKey || e.metaKey) {
       this.toggleItemSelection(itemKey);
-    } else if (this.options.selectionMode === 'single') {
-      this.setSelectedItem(itemKey);
     } else {
       this.setSelectedItem(itemKey);
     }
-    this._setFocusedItem(itemKey);
+  }
+
+  _toStrKey(k) {
+    if (k == null) return null;
+    return String(k);
+  }
+
+  _origKey(strKey) {
+    if (strKey == null) return null;
+    if (this._keyRegistry.has(strKey)) return this._keyRegistry.get(strKey);
+    return strKey;
+  }
+
+  _registerKey(original) {
+    if (original == null) return null;
+    const s = String(original);
+    if (!this._keyRegistry.has(s)) this._keyRegistry.set(s, original);
+    return s;
   }
 
   _extractItemKeyFromFull(fullKey) {
     if (typeof fullKey !== 'string') return null;
-    if (fullKey.startsWith('__item_')) return fullKey.slice('__item_'.length);
+    if (fullKey.startsWith('__item_')) {
+      const raw = fullKey.slice('__item_'.length);
+      return raw;
+    }
     return null;
   }
 
   _onKeyDown(e) {
     const mode = this.options.selectionMode;
-    if (mode === 'none' && !this.focusedKey) return;
+    const hasFocus = this.focusedKey != null;
+    if (mode === 'none' && !hasFocus) return;
 
     const key = e.key;
-    if (key !== 'ArrowUp' && key !== 'ArrowDown' && key !== ' ' && key !== 'Enter') return;
+    if (['ArrowUp','ArrowDown','Home','End','PageUp','PageDown',' ','Enter'].indexOf(key) < 0) return;
 
     if (key === 'ArrowUp' || key === 'ArrowDown') {
       e.preventDefault();
       const step = key === 'ArrowUp' ? -1 : 1;
-
-      let startIdx = -1;
-      if (this.focusedKey != null) {
-        const full = `__item_${this.focusedKey}`;
-        startIdx = this.keyToFlatIndex.get(full);
-      }
-      if (startIdx == null) startIdx = -1;
-
-      let nextIdx = startIdx + step;
-      while (nextIdx >= 0 && nextIdx < this.flatItems.length) {
-        const flat = this.flatItems[nextIdx];
-        if (flat.type === 'item') break;
-        nextIdx += step;
-      }
-      if (nextIdx < 0 || nextIdx >= this.flatItems.length) return;
-
-      const nextFlat = this.flatItems[nextIdx];
-      const itemKey = nextFlat._itemKey;
-
+      const nextItemKey = this._findNextItemKey(this.focusedKey, step, true);
+      if (nextItemKey == null) return;
       if (e.shiftKey && mode === 'multiple') {
-        this._selectRange(this._lastRangeSelectedKey != null ? this._lastRangeSelectedKey : itemKey, itemKey);
+        this._selectRange(this._lastRangeSelectedKey != null ? this._lastRangeSelectedKey : nextItemKey, nextItemKey);
       }
-
-      this._setFocusedItem(itemKey);
-      this._scrollItemIntoViewIfNeeded(nextIdx);
+      this._setFocusedItem(nextItemKey);
+      const full = `__item_${nextItemKey}`;
+      const idx = this.keyToFlatIndex.get(full);
+      if (idx != null) this._scrollItemIntoViewIfNeeded(idx);
       return;
     }
 
-    if ((key === ' ' || key === 'Enter') && this.focusedKey != null && mode !== 'none') {
+    if (key === 'Home' || key === 'End') {
       e.preventDefault();
-      if (mode === 'single') {
-        this.setSelectedItem(this.focusedKey);
-      } else {
-        this.toggleItemSelection(this.focusedKey);
+      const oldFocusedKey = this.focusedKey;
+      const targetKey = this._findEdgeItemKey(key === 'Home' ? 'first' : 'last');
+      if (targetKey == null) return;
+      if (e.shiftKey && mode === 'multiple' && hasFocus && oldFocusedKey != null) {
+        this._selectRange(oldFocusedKey, targetKey);
+      }
+      this._setFocusedItem(targetKey);
+      const full = `__item_${targetKey}`;
+      const idx = this.keyToFlatIndex.get(full);
+      if (idx != null) {
+        this._suppressScrollEvent = true;
+        if (key === 'Home') {
+          this.container.scrollTop = 0;
+          this.scrollTop = 0;
+        } else {
+          const bottom = Math.max(0, this.totalHeight - this.container.clientHeight);
+          this.container.scrollTop = bottom;
+          this.scrollTop = bottom;
+        }
+        this._captureAnchor();
+        this._scrollItemIntoViewIfNeeded(idx);
+      }
+      return;
+    }
+
+    if (key === 'PageUp' || key === 'PageDown') {
+      e.preventDefault();
+      const oldFocusedKey = this.focusedKey;
+      const pageSize = Math.max(1, Math.floor(this.container.clientHeight / (this.options.itemHeight || this.options.estimatedItemHeight)));
+      const step = key === 'PageUp' ? -pageSize : pageSize;
+      const nextItemKey = this._findNextItemKey(this.focusedKey, step, true);
+      if (nextItemKey == null) {
+        this._suppressScrollEvent = true;
+        const delta = this.container.clientHeight * (key === 'PageUp' ? -1 : 1);
+        const t = Math.max(0, Math.min(this.totalHeight, this.container.scrollTop + delta));
+        this.container.scrollTop = t;
+        this.scrollTop = t;
+        this._captureAnchor();
+        this._scheduleRender();
+        return;
+      }
+      if (e.shiftKey && mode === 'multiple' && hasFocus && oldFocusedKey != null) {
+        this._selectRange(oldFocusedKey, nextItemKey);
+      }
+      this._setFocusedItem(nextItemKey);
+      const full = `__item_${nextItemKey}`;
+      const idx = this.keyToFlatIndex.get(full);
+      if (idx != null) {
+        this._suppressScrollEvent = true;
+        const desired = this.offsets[idx] - this.container.clientHeight / 2;
+        const t = Math.max(0, Math.min(this.totalHeight, desired));
+        this.container.scrollTop = t;
+        this.scrollTop = t;
+        this._captureAnchor();
+        this._scheduleRender();
+      }
+      return;
+    }
+
+    if ((key === ' ' || key === 'Enter') && hasFocus && mode !== 'none') {
+      e.preventDefault();
+      if (mode === 'single') this.setSelectedItem(this.focusedKey);
+      else this.toggleItemSelection(this.focusedKey);
+    }
+  }
+
+  _findNextItemKey(fromKey, step, autoExpand) {
+    let idx = -1;
+    if (fromKey != null) {
+      const full = `__item_${fromKey}`;
+      idx = this.keyToFlatIndex.get(full) != null ? this.keyToFlatIndex.get(full) : -1;
+    }
+
+    if (idx === -1) {
+      if (step > 0) return this._findEdgeItemKey('first');
+      else return this._findEdgeItemKey('last');
+    }
+
+    const dir = step > 0 ? 1 : -1;
+    const abs = Math.abs(step);
+
+    let currentIdx = idx;
+    let count = 0;
+    while (count < abs) {
+      let nextIdx = currentIdx + dir;
+      while (nextIdx >= 0 && nextIdx < this.flatItems.length) {
+        const flat = this.flatItems[nextIdx];
+        if (flat.type === 'item') {
+          currentIdx = nextIdx;
+          break;
+        }
+        if (flat.type === 'header' && autoExpand && this.collapsedGroups.has(flat._groupKey)) {
+          this._expandGroupSilent(flat._groupKey);
+          nextIdx = currentIdx + dir;
+          continue;
+        }
+        nextIdx += dir;
+      }
+      if (nextIdx < 0 || nextIdx >= this.flatItems.length) {
+        if (this.flatItems[currentIdx] && this.flatItems[currentIdx].type === 'item') return this.flatItems[currentIdx]._itemKey;
+        return null;
+      }
+      count++;
+    }
+    if (this.flatItems[currentIdx] && this.flatItems[currentIdx].type === 'item') {
+      return this.flatItems[currentIdx]._itemKey;
+    }
+    return null;
+  }
+
+  _findEdgeItemKey(edge) {
+    if (this.flatItems.length === 0) return null;
+    if (edge === 'first') {
+      for (let i = 0; i < this.flatItems.length; i++) {
+        if (this.flatItems[i].type === 'item') return this.flatItems[i]._itemKey;
+      }
+    } else {
+      for (let i = this.flatItems.length - 1; i >= 0; i--) {
+        if (this.flatItems[i].type === 'item') return this.flatItems[i]._itemKey;
       }
     }
+    return null;
+  }
+
+  _expandGroupSilent(groupKey) {
+    if (!this.collapsedGroups.has(groupKey)) return;
+    this.collapsedGroups.delete(groupKey);
+    this.flatItems = this._flattenData(this.data);
+    this._updateOffsets();
+    this.scrollContent.style.height = `${this.totalHeight}px`;
   }
 
   _scrollItemIntoViewIfNeeded(flatIdx) {
@@ -236,8 +391,8 @@ class VirtualList {
   }
 
   _selectRange(fromKey, toKey) {
-    const fromFull = `__item_${fromKey}`;
-    const toFull = `__item_${toKey}`;
+    const fromFull = `__item_${this._toStrKey(fromKey)}`;
+    const toFull = `__item_${this._toStrKey(toKey)}`;
     const idx1 = this.keyToFlatIndex.get(fromFull);
     const idx2 = this.keyToFlatIndex.get(toFull);
     if (idx1 == null || idx2 == null) return;
@@ -252,64 +407,48 @@ class VirtualList {
   }
 
   _replaceSelection(keys) {
-    const beforeSize = this.selectedKeys.size;
     this.selectedKeys = new Set(keys);
     if (keys.length > 0) this._lastRangeSelectedKey = keys[keys.length - 1];
-    if (beforeSize !== this.selectedKeys.size || keys.some(k => !this.selectedKeys.has(k))) {
-      this._emitSelectionChange();
-      this._scheduleRender();
-    }
-  }
-
-  _setFocusedItem(itemKey) {
-    if (this.focusedKey === itemKey) return;
-    this.focusedKey = itemKey;
-    this._lastRangeSelectedKey = itemKey;
-    if (this.options.onFocusChange) {
-      let item = null;
-      const full = `__item_${itemKey}`;
-      const idx = this.keyToFlatIndex.get(full);
-      if (idx != null) {
-        const flat = this.flatItems[idx];
-        if (flat && flat.type === 'item') item = flat.item;
-      }
-      this.options.onFocusChange(itemKey, item);
-    }
+    this._emitSelectionChange();
     this._scheduleRender();
   }
 
-  _emitSelectionChange() {
-    if (!this.options.onSelectionChange) return;
-    const items = [];
-    for (const k of this.selectedKeys) {
-      const full = `__item_${k}`;
-      const idx = this.keyToFlatIndex.get(full);
-      if (idx != null) {
-        const flat = this.flatItems[idx];
-        if (flat && flat.type === 'item') items.push(flat.item);
-      }
+  setSelectedKeys(keys, { emit = true } = {}) {
+    if (this.options.selectionMode === 'none') return;
+    const arr = Array.isArray(keys) ? keys : (keys instanceof Set ? [...keys] : []);
+    const strArr = arr.map(k => this._toStrKey(k)).filter(k => k != null);
+    if (this.options.selectionMode === 'single' && strArr.length > 1) {
+      this.selectedKeys = new Set([strArr[strArr.length - 1]]);
+    } else {
+      this.selectedKeys = new Set(strArr);
     }
-    this.options.onSelectionChange(new Set(this.selectedKeys), items);
+    if (this.selectedKeys.size > 0) {
+      const last = [...this.selectedKeys].pop();
+      this._lastRangeSelectedKey = last;
+    }
+    if (emit) this._emitSelectionChange();
+    this._scheduleRender();
   }
 
   setSelectedItem(itemKey) {
     if (this.options.selectionMode === 'none') return;
-    this.selectedKeys = new Set([itemKey]);
-    this._lastRangeSelectedKey = itemKey;
+    const sk = this._toStrKey(itemKey);
+    if (sk == null) return;
+    this.selectedKeys = new Set([sk]);
+    this._lastRangeSelectedKey = sk;
     this._emitSelectionChange();
     this._scheduleRender();
   }
 
   toggleItemSelection(itemKey) {
     if (this.options.selectionMode === 'none') return;
-    if (this.options.selectionMode === 'single') {
-      return this.setSelectedItem(itemKey);
-    }
-    if (this.selectedKeys.has(itemKey)) {
-      this.selectedKeys.delete(itemKey);
-    } else {
-      this.selectedKeys.add(itemKey);
-      this._lastRangeSelectedKey = itemKey;
+    const sk = this._toStrKey(itemKey);
+    if (sk == null) return;
+    if (this.options.selectionMode === 'single') return this.setSelectedItem(itemKey);
+    if (this.selectedKeys.has(sk)) this.selectedKeys.delete(sk);
+    else {
+      this.selectedKeys.add(sk);
+      this._lastRangeSelectedKey = sk;
     }
     this._emitSelectionChange();
     this._scheduleRender();
@@ -333,15 +472,51 @@ class VirtualList {
 
   getSelection() {
     const items = [];
+    const origKeys = [];
     for (const k of this.selectedKeys) {
       const full = `__item_${k}`;
       const idx = this.keyToFlatIndex.get(full);
       if (idx != null) {
         const flat = this.flatItems[idx];
-        if (flat && flat.type === 'item') items.push(flat.item);
+        if (flat && flat.type === 'item') {
+          items.push(flat.item);
+          origKeys.push(flat._itemKeyOrig != null ? flat._itemKeyOrig : this._origKey(k));
+        }
       }
     }
-    return { keys: new Set(this.selectedKeys), items };
+    return { keys: new Set(origKeys), items };
+  }
+
+  setFocusedItem(itemKey, { scrollIntoView = true, emit = true } = {}) {
+    const sk = this._toStrKey(itemKey);
+    if (sk != null) {
+      let full = `__item_${sk}`;
+      if (!this.keyToFlatIndex.has(full)) {
+        const found = this._uncollapseGroupContainingItem(sk);
+        if (!found) return false;
+        full = `__item_${sk}`;
+        if (!this.keyToFlatIndex.has(full)) return false;
+      }
+    }
+    const before = this.focusedKey;
+    this.focusedKey = sk;
+    if (sk != null) this._lastRangeSelectedKey = sk;
+    if (emit && before !== sk && this.options.onFocusChange) {
+      let item = null;
+      if (sk != null) {
+        const r = this.getFocusedItem();
+        item = r.item;
+      }
+      const origK = this._origKey(sk);
+      this.options.onFocusChange(origK, item);
+    }
+    if (scrollIntoView && sk != null) {
+      const full = `__item_${sk}`;
+      const idx = this.keyToFlatIndex.get(full);
+      if (idx != null) this._scrollItemIntoViewIfNeeded(idx);
+    }
+    this._scheduleRender();
+    return true;
   }
 
   getFocusedItem() {
@@ -350,44 +525,195 @@ class VirtualList {
     const idx = this.keyToFlatIndex.get(full);
     if (idx != null) {
       const flat = this.flatItems[idx];
-      if (flat && flat.type === 'item') return { key: this.focusedKey, item: flat.item };
+      if (flat && flat.type === 'item') {
+        const orig = flat._itemKeyOrig != null ? flat._itemKeyOrig : this._origKey(this.focusedKey);
+        return { key: orig, item: flat.item };
+      }
     }
-    return { key: this.focusedKey, item: null };
+    return { key: this._origKey(this.focusedKey), item: null };
   }
 
   isItemSelected(itemKey) {
-    return this.selectedKeys.has(itemKey);
+    const sk = this._toStrKey(itemKey);
+    return sk != null && this.selectedKeys.has(sk);
   }
 
   isItemFocused(itemKey) {
-    return this.focusedKey === itemKey;
+    const sk = this._toStrKey(itemKey);
+    return sk != null && this.focusedKey === sk;
+  }
+
+  _setFocusedItem(itemKey) {
+    const before = this.focusedKey;
+    const sk = this._toStrKey(itemKey);
+    this.focusedKey = sk;
+    if (sk != null) this._lastRangeSelectedKey = sk;
+    if (before !== sk && this.options.onFocusChange) {
+      let item = null;
+      if (sk != null) {
+        const full = `__item_${sk}`;
+        const idx = this.keyToFlatIndex.get(full);
+        if (idx != null) {
+          const flat = this.flatItems[idx];
+          if (flat && flat.type === 'item') item = flat.item;
+        }
+      }
+      const origK = this._origKey(sk);
+      this.options.onFocusChange(origK, item);
+    }
+  }
+
+  _emitSelectionChange() {
+    if (!this.options.onSelectionChange) return;
+    const items = [];
+    const origKeys = [];
+    for (const k of this.selectedKeys) {
+      const full = `__item_${k}`;
+      const idx = this.keyToFlatIndex.get(full);
+      if (idx != null) {
+        const flat = this.flatItems[idx];
+        if (flat && flat.type === 'item') {
+          items.push(flat.item);
+          origKeys.push(flat._itemKeyOrig != null ? flat._itemKeyOrig : this._origKey(k));
+        }
+      }
+    }
+    this.options.onSelectionChange(new Set(origKeys), items);
+  }
+
+  _uncollapseGroupContainingItem(strItemKey) {
+    if (!this.isGrouped) return false;
+    for (const g of this.data) {
+      const gk = this._toStrKey(this.options.getGroupKey(g));
+      if (this.collapsedGroups.has(gk)) {
+        for (const it of g.items) {
+          if (this._toStrKey(this.options.getItemKey(it)) === strItemKey) {
+            this._expandGroupSilent(gk);
+            return true;
+          }
+        }
+      }
+    }
+    return false;
   }
 
   toggleGroupCollapse(groupKey) {
+    const gk = this._toStrKey(groupKey);
+    if (gk == null) return;
     this._captureAnchor();
-    if (this.collapsedGroups.has(groupKey)) {
-      this.collapsedGroups.delete(groupKey);
-    } else {
-      this.collapsedGroups.add(groupKey);
-    }
+    if (this.collapsedGroups.has(gk)) this.collapsedGroups.delete(gk);
+    else this.collapsedGroups.add(gk);
     this.flatItems = this._flattenData(this.data);
     this._updateOffsets();
     this.scrollContent.style.height = `${this.totalHeight}px`;
     if (this.anchor) this._restoreAnchor();
     if (this.options.onGroupCollapseChange) {
-      this.options.onGroupCollapseChange(groupKey, this.collapsedGroups.has(groupKey));
+      this.options.onGroupCollapseChange(this._origKey(gk), this.collapsedGroups.has(gk));
+    }
+    if (this.options.onStickyGroupChange) {
+      const sticky = this.currentStickyGroupKey != null ? this._buildStickyInfo(this.currentStickyGroupKey) : null;
+      this.options.onStickyGroupChange(sticky);
     }
     this._scheduleRender();
   }
 
   setGroupCollapsed(groupKey, collapsed) {
-    const isCollapsed = this.collapsedGroups.has(groupKey);
+    const gk = this._toStrKey(groupKey);
+    const isCollapsed = this.collapsedGroups.has(gk);
     if (collapsed === isCollapsed) return;
     this.toggleGroupCollapse(groupKey);
   }
 
+  expandOnlyGroup(groupKey) {
+    const gk = this._toStrKey(groupKey);
+    this._captureAnchor();
+    this.collapsedGroups.clear();
+    const changed = [];
+    for (const g of this.data) {
+      const k = this._toStrKey(this.options.getGroupKey(g));
+      if (k !== gk) { this.collapsedGroups.add(k); changed.push(k); }
+    }
+    this._afterBatchCollapse(true, changed);
+  }
+
+  setExpandedGroups(groupKeys, { mode = 'replace', emitEach = true } = {}) {
+    this._captureAnchor();
+    const keys = (Array.isArray(groupKeys) ? groupKeys : (groupKeys instanceof Set ? [...groupKeys] : []))
+      .map(k => this._toStrKey(k)).filter(k => k != null);
+    if (mode === 'replace') {
+      this.collapsedGroups.clear();
+      for (const g of this.data) {
+        const k = this._toStrKey(this.options.getGroupKey(g));
+        if (!keys.includes(k)) this.collapsedGroups.add(k);
+      }
+    } else if (mode === 'add') {
+      for (const k of keys) this.collapsedGroups.delete(k);
+    } else if (mode === 'remove') {
+      for (const k of keys) this.collapsedGroups.add(k);
+    }
+    this._afterBatchCollapse(emitEach, keys);
+  }
+
+  setCollapsedGroups(groupKeys, { mode = 'replace' } = {}) {
+    const keys = (Array.isArray(groupKeys) ? groupKeys : (groupKeys instanceof Set ? [...groupKeys] : []))
+      .map(k => this._toStrKey(k)).filter(k => k != null);
+    this._captureAnchor();
+    if (mode === 'replace') {
+      this.collapsedGroups = new Set(keys);
+    } else if (mode === 'add') {
+      for (const k of keys) this.collapsedGroups.add(k);
+    } else if (mode === 'remove') {
+      for (const k of keys) this.collapsedGroups.delete(k);
+    }
+    this._afterBatchCollapse(true, keys);
+  }
+
   isGroupCollapsed(groupKey) {
-    return this.collapsedGroups.has(groupKey);
+    const gk = this._toStrKey(groupKey);
+    return gk != null && this.collapsedGroups.has(gk);
+  }
+
+  filterGroups(predicate) {
+    if (!this.isGrouped) return;
+    if (this._originalData == null) this._originalData = [...this.data];
+    const filtered = this._originalData.filter(g => predicate(g));
+    this.setData(filtered);
+  }
+
+  clearGroupFilter() {
+    if (this._originalData == null) return;
+    const backup = [...this._originalData];
+    this._originalData = null;
+    this.setData(backup);
+  }
+
+  _afterBatchCollapse(emitEach = true, changedKeys = []) {
+    this.flatItems = this._flattenData(this.data);
+    this._updateOffsets();
+    this.scrollContent.style.height = `${this.totalHeight}px`;
+    if (this.anchor) this._restoreAnchor();
+    if (emitEach && this.options.onGroupCollapseChange) {
+      for (const k of changedKeys) this.options.onGroupCollapseChange(this._origKey(k), this.collapsedGroups.has(k));
+    }
+    if (this.options.onStickyGroupChange) {
+      const sticky = this.currentStickyGroupKey != null ? this._buildStickyInfo(this.currentStickyGroupKey) : null;
+      this.options.onStickyGroupChange(sticky);
+    }
+    this._scheduleRender();
+  }
+
+  _buildStickyInfo(groupKey) {
+    const headerKey = `__header_${groupKey}`;
+    const idx = this.keyToFlatIndex.get(headerKey);
+    if (idx == null) return null;
+    const flat = this.flatItems[idx];
+    return {
+      key: flat._groupKeyOrig != null ? flat._groupKeyOrig : this._origKey(groupKey),
+      groupIndex: flat.groupIndex,
+      group: flat.group,
+      data: flat.data,
+      collapsed: this.collapsedGroups.has(groupKey)
+    };
   }
 
   _onScroll() {
@@ -475,21 +801,23 @@ class VirtualList {
 
     if (this.isGrouped) {
       data.forEach((group, groupIndex) => {
-        const groupKey = this.options.getGroupKey(group);
+        const groupKeyOrig = this.options.getGroupKey(group);
+        const groupKey = this._registerKey(groupKeyOrig);
         const headerKey = `__header_${groupKey}`;
         flat.push({
           type: 'header', group: group.group, groupIndex,
-          _groupKey: groupKey, _key: headerKey, data: group
+          _groupKey: groupKey, _groupKeyOrig: groupKeyOrig, _key: headerKey, data: group
         });
         this.keyToFlatIndex.set(headerKey, flat.length - 1);
 
         if (!this.collapsedGroups.has(groupKey)) {
           group.items.forEach((item, itemIndex) => {
-            const itemKey = this.options.getItemKey(item);
+            const itemKeyOrig = this.options.getItemKey(item);
+            const itemKey = this._registerKey(itemKeyOrig);
             const full = `__item_${itemKey}`;
             flat.push({
               type: 'item', item, groupIndex, itemIndex, group: group.group,
-              _groupKey: groupKey, _itemKey: itemKey, _key: full
+              _groupKey: groupKey, _itemKey: itemKey, _itemKeyOrig: itemKeyOrig, _key: full
             });
             this.keyToFlatIndex.set(full, flat.length - 1);
           });
@@ -497,10 +825,11 @@ class VirtualList {
       });
     } else {
       data.forEach((item, index) => {
-        const itemKey = this.options.getItemKey(item);
+        const itemKeyOrig = this.options.getItemKey(item);
+        const itemKey = this._registerKey(itemKeyOrig);
         const full = `__item_${itemKey}`;
         flat.push({
-          type: 'item', item, index, _itemKey: itemKey, _key: full
+          type: 'item', item, index, _itemKey: itemKey, _itemKeyOrig: itemKeyOrig, _key: full
         });
         this.keyToFlatIndex.set(full, flat.length - 1);
       });
@@ -555,9 +884,7 @@ class VirtualList {
   }
 
   _render() {
-    if (this.offsets.length !== this.flatItems.length) {
-      this._updateOffsets();
-    }
+    if (this.offsets.length !== this.flatItems.length) this._updateOffsets();
     const { start, end } = this._getVisibleRangeRaw();
     const viewportStart = start + this.options.buffer;
     const viewportEnd = end - this.options.buffer;
@@ -566,8 +893,8 @@ class VirtualList {
     if (rangeChanged && this.options.onVisibleRangeChange) {
       const s = Math.max(0, viewportStart);
       const e = Math.max(s, viewportEnd);
-      const { startIndex, endIndex, items, flatItems } = this._computeTrueVisibleRange(s, e);
-      this.options.onVisibleRangeChange({ startIndex, endIndex, items, flatItems });
+      const trueRange = this._computeTrueVisibleRange(s, e);
+      this.options.onVisibleRangeChange(trueRange);
     }
 
     if (start === this.visibleStartIndex && end === this.visibleEndIndex) return;
@@ -608,7 +935,8 @@ class VirtualList {
     const effectiveBottom = scrollTop + this.container.clientHeight;
 
     let trueStart = -1;
-    for (let i = Math.max(0, viewportStart - 1); i < this.flatItems.length; i++) {
+    const scanStart = Math.max(0, viewportStart - 1);
+    for (let i = scanStart; i < this.flatItems.length; i++) {
       const flat = this.flatItems[i];
       const top = this.offsets[i];
       const bottom = top + this._getHeightByKey(flat._key, flat);
@@ -658,18 +986,20 @@ class VirtualList {
   _renderItem(flatItem, index) {
     if (flatItem.type === 'header') {
       if (this.options.renderGroupHeader) {
+        const origGk = flatItem._groupKeyOrig != null ? flatItem._groupKeyOrig : this._origKey(flatItem._groupKey);
         const ctx = {
           group: flatItem.group,
           groupIndex: flatItem.groupIndex,
-          groupKey: flatItem._groupKey,
+          groupKey: origGk,
           data: flatItem.data,
           collapsed: this.collapsedGroups.has(flatItem._groupKey),
-          toggleCollapse: () => this.toggleGroupCollapse(flatItem._groupKey)
+          toggleCollapse: () => this.toggleGroupCollapse(origGk)
         };
         const headerEl = this.options.renderGroupHeader(ctx, index);
         if (headerEl && headerEl instanceof HTMLElement) {
           headerEl.dataset.key = flatItem._key;
           headerEl.dataset.type = 'header';
+          headerEl.dataset.groupKey = flatItem._groupKey;
           headerEl.style.cursor = 'pointer';
           headerEl.style.userSelect = 'none';
           return headerEl;
@@ -680,25 +1010,30 @@ class VirtualList {
 
     if (this.options.renderItem) {
       const itemKey = flatItem._itemKey;
+      const origItemKey = flatItem._itemKeyOrig != null ? flatItem._itemKeyOrig : this._origKey(itemKey);
+      const origGk = flatItem._groupKey != null
+        ? (flatItem._groupKeyOrig != null ? flatItem._groupKeyOrig : this._origKey(flatItem._groupKey))
+        : null;
+      const selected = this.selectedKeys.has(itemKey);
+      const focused = this.focusedKey === itemKey;
       const itemCtx = this.isGrouped
         ? {
             item: flatItem.item, groupIndex: flatItem.groupIndex,
             itemIndex: flatItem.itemIndex, group: flatItem.group,
-            groupKey: flatItem._groupKey, key: itemKey,
-            selected: this.selectedKeys.has(itemKey),
-            focused: this.focusedKey === itemKey
+            groupKey: origGk, key: origItemKey,
+            selected, focused
           }
         : {
-            item: flatItem.item, index: flatItem.index, key: itemKey,
-            selected: this.selectedKeys.has(itemKey),
-            focused: this.focusedKey === itemKey
+            item: flatItem.item, index: flatItem.index, key: origItemKey,
+            selected, focused
           };
       const itemEl = this.options.renderItem(itemCtx, index);
       if (itemEl && itemEl instanceof HTMLElement) {
         itemEl.dataset.key = flatItem._key;
         itemEl.dataset.type = 'item';
-        if (this.focusedKey === itemKey) itemEl.dataset.focused = 'true';
-        if (this.selectedKeys.has(itemKey)) itemEl.dataset.selected = 'true';
+        itemEl.dataset.groupKey = flatItem._groupKey != null ? flatItem._groupKey : '';
+        if (focused) itemEl.dataset.focused = 'true';
+        if (selected) itemEl.dataset.selected = 'true';
         return itemEl;
       }
     }
@@ -720,6 +1055,7 @@ class VirtualList {
     let currentGroupKey = null;
     let currentGroupIndex = -1;
     let currentGroupData = null;
+    let currentGroupOrigKey = null;
     let nextHeaderOffset = Infinity;
 
     for (let i = 0; i < this.flatItems.length; i++) {
@@ -730,6 +1066,7 @@ class VirtualList {
           currentGroupKey = flat._groupKey;
           currentGroupIndex = flat.groupIndex;
           currentGroupData = flat.data;
+          currentGroupOrigKey = flat._groupKeyOrig != null ? flat._groupKeyOrig : this._origKey(flat._groupKey);
         } else {
           nextHeaderOffset = headerOffset;
           break;
@@ -737,29 +1074,23 @@ class VirtualList {
       }
     }
 
-    if (currentGroupKey !== this.currentStickyGroupKey && this.options.onStickyGroupChange) {
-      this.options.onStickyGroupChange(currentGroupKey != null ? {
-        key: currentGroupKey,
-        groupIndex: currentGroupIndex,
-        group: currentGroupData ? currentGroupData.group : null,
-        data: currentGroupData
-      } : null);
-    }
+    const changed = currentGroupKey !== this.currentStickyGroupKey;
     this.currentStickyGroupKey = currentGroupKey;
 
     if (currentGroupKey != null) {
       const ctx = {
         group: currentGroupData ? currentGroupData.group : null,
         groupIndex: currentGroupIndex,
-        groupKey: currentGroupKey,
+        groupKey: currentGroupOrigKey,
         data: currentGroupData,
         collapsed: this.collapsedGroups.has(currentGroupKey),
-        toggleCollapse: () => this.toggleGroupCollapse(currentGroupKey)
+        toggleCollapse: () => this.toggleGroupCollapse(currentGroupOrigKey)
       };
       const headerEl = stickyRender(ctx, -1);
       this.stickyHeader.innerHTML = '';
       if (headerEl && headerEl instanceof HTMLElement) {
         headerEl.style.pointerEvents = 'auto';
+        headerEl.dataset.groupKey = currentGroupKey;
         this.stickyHeader.appendChild(headerEl);
       }
       this.stickyHeader.style.display = 'block';
@@ -773,6 +1104,16 @@ class VirtualList {
       }
     } else {
       this.stickyHeader.style.display = 'none';
+    }
+
+    if (changed && this.options.onStickyGroupChange) {
+      this.options.onStickyGroupChange(currentGroupKey != null ? {
+        key: currentGroupOrigKey,
+        groupIndex: currentGroupIndex,
+        group: currentGroupData ? currentGroupData.group : null,
+        data: currentGroupData,
+        collapsed: this.collapsedGroups.has(currentGroupKey)
+      } : null);
     }
   }
 
@@ -796,11 +1137,11 @@ class VirtualList {
     const merged = [...existingData];
     const groupKeyToIndex = new Map();
     merged.forEach((g, i) => {
-      const key = this.options.getGroupKey(g);
+      const key = this._toStrKey(this.options.getGroupKey(g));
       if (key != null) groupKeyToIndex.set(key, i);
     });
     for (const newGroup of newGroups) {
-      const key = this.options.getGroupKey(newGroup);
+      const key = this._toStrKey(this.options.getGroupKey(newGroup));
       if (key != null && groupKeyToIndex.has(key)) {
         const idx = groupKeyToIndex.get(key);
         merged[idx] = { ...merged[idx], items: [...merged[idx].items, ...newGroup.items] };
@@ -860,9 +1201,15 @@ class VirtualList {
 
   scrollToItem(itemKey, options = {}) {
     const { behavior = 'auto', align = 'start' } = options;
-    const fullKey = `__item_${itemKey}`;
-    const idx = this.keyToFlatIndex.get(fullKey);
-    if (idx == null) return false;
+    const sk = this._toStrKey(itemKey);
+    let fullKey = `__item_${sk}`;
+    let idx = this.keyToFlatIndex.get(fullKey);
+    if (idx == null) {
+      if (this.isGrouped) this._uncollapseGroupContainingItem(sk);
+      fullKey = `__item_${sk}`;
+      idx = this.keyToFlatIndex.get(fullKey);
+      if (idx == null) return false;
+    }
 
     let targetTop = this.offsets[idx];
     const itemH = this._getHeightByKey(fullKey, this.flatItems[idx]);
@@ -881,19 +1228,14 @@ class VirtualList {
 
   scrollToGroup(groupKey, options = {}) {
     const { behavior = 'auto' } = options;
-    const fullKey = `__header_${groupKey}`;
-    const idx = this.keyToFlatIndex.get(fullKey);
+    const gk = this._toStrKey(groupKey);
+    const fullKey = `__header_${gk}`;
+    let idx = this.keyToFlatIndex.get(fullKey);
     if (idx == null) return false;
-    if (this.collapsedGroups.has(groupKey)) {
-      this.setGroupCollapsed(groupKey, false);
-      const newIdx = this.keyToFlatIndex.get(fullKey);
-      if (newIdx == null) return false;
-      const offset = this.offsets[newIdx];
-      this._suppressScrollEvent = true;
-      this.container.scrollTo({ top: offset, behavior });
-      this.scrollTop = offset;
-      this._scheduleUpdate(false);
-      return true;
+    if (this.collapsedGroups.has(gk)) {
+      this._expandGroupSilent(gk);
+      const idx2 = this.keyToFlatIndex.get(fullKey);
+      if (idx2 != null) idx = idx2; else return false;
     }
     const offset = this.offsets[idx];
     this._suppressScrollEvent = true;
@@ -915,17 +1257,7 @@ class VirtualList {
 
   getCurrentStickyGroup() {
     if (!this.isGrouped || this.currentStickyGroupKey == null) return null;
-    const headerKey = `__header_${this.currentStickyGroupKey}`;
-    const idx = this.keyToFlatIndex.get(headerKey);
-    if (idx == null) return null;
-    const flat = this.flatItems[idx];
-    return {
-      key: this.currentStickyGroupKey,
-      groupIndex: flat.groupIndex,
-      group: flat.group,
-      data: flat.data,
-      collapsed: this.collapsedGroups.has(this.currentStickyGroupKey)
-    };
+    return this._buildStickyInfo(this.currentStickyGroupKey);
   }
 
   refresh() {

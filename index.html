@@ -118,7 +118,9 @@
       <button class="btn secondary" onclick="selDemo.shuffle()">打乱顺序</button>
       <div class="sep"></div>
       <button class="btn secondary" onclick="selDemo.focusFirst()">设焦点第1条</button>
-      <span style="font-size:12px;color:#64748b;">提示:点击列表获得焦点,用 ↑↓ 移动,空格/回车选中,Shift 范围选,Ctrl 多选</span>
+      <button class="btn" onclick="selDemo.setExternalSel()">外部setSelectedKeys</button>
+      <button class="btn secondary" onclick="selDemo.setExternalFocus()">外部setFocusedItem</button>
+      <span style="font-size:12px;color:#64748b;">↑↓移动,Home/End/PageUp/PageDown,空格/回车选,Shift范围</span>
     </div>
     <div class="stats sel">
       <div class="stat">选中数量:<b id="sel-count">0</b></div>
@@ -144,6 +146,13 @@
           <div class="sep"></div>
           <button class="btn secondary" onclick="grpDemo.collapseAll()">全部折叠</button>
           <button class="btn secondary" onclick="grpDemo.expandAll()">全部展开</button>
+          <div class="sep"></div>
+          <button class="btn" onclick="grpDemo.expandOnly1()">只展开G-1</button>
+          <button class="btn secondary" onclick="grpDemo.expandOdd()">批量展开奇数</button>
+          <div class="sep"></div>
+          <input type="text" id="grp-filter" placeholder="输入分组关键字过滤" style="width:160px;"/>
+          <button class="btn" onclick="grpDemo.doFilter()">过滤</button>
+          <button class="btn secondary" onclick="grpDemo.clearFilter()">清除</button>
         </div>
         <div class="stats">
           <div class="stat">分组数:<b id="grp-groups">0</b></div>
@@ -265,10 +274,11 @@ const selDemo = (() => {
   function rebuild() {
     const c = document.getElementById('sel-list');
     c.innerHTML = '';
-    list = new VirtualList(c, {
+    const m = mode();
+    const opts = {
       itemHeight: 60,
       buffer: 6,
-      selectionMode: mode(),
+      selectionMode: m,
       getItemKey: it => it.id,
       renderItem: render,
       onVisibleRangeChange: r => {
@@ -279,13 +289,19 @@ const selDemo = (() => {
         const arr = [...keys];
         document.getElementById('sel-ids').textContent = arr.length === 0 ? '-' :
           arr.length <= 5 ? arr.join(', ') : `${arr.slice(0,5).join(', ')}...+${arr.length-5}`;
-        log('sel-output', 'SELECT', `选中变化 → 共 ${keys.size} 条`);
+        const types = new Set([...keys].map(k => typeof k));
+        log('sel-output', 'SELECT', `选中变化 → ${keys.size} 条 (类型:${[...types].join('/')})`);
       },
       onFocusChange: (key, item) => {
-        document.getElementById('sel-focus').textContent = key != null ? key : '-';
-        if (key != null) log('sel-output', 'FOCUS', `焦点 → id=${key}`);
+        document.getElementById('sel-focus').textContent = key != null ? `${key} (${typeof key})` : '-';
+        if (key != null) log('sel-output', 'FOCUS', `焦点 → id=${key} (${typeof key})`);
       }
-    });
+    };
+    if (data.length > 3) {
+      if (m !== 'none') opts.defaultSelectedKeys = [data[1].id, data[2].id];
+      opts.defaultFocusedKey = data[1].id;
+    }
+    list = new VirtualList(c, opts);
     list.setData(data);
     document.getElementById('sel-total').textContent = data.length.toLocaleString();
   }
@@ -322,8 +338,20 @@ const selDemo = (() => {
     },
     focusFirst() {
       if (!list || data.length === 0) return;
-      list.setFocused && list.setFocusedItem(data[0].id);
-      list.scrollToItem(data[0].id);
+      const ok = list.setFocusedItem(data[0].id);
+      log('sel-output', 'SETFOCUS', `设焦点 id=${data[0].id} → ${ok ? '成功' : '失败'}`);
+    },
+    setExternalSel() {
+      if (!list || data.length < 10) return;
+      const ids = [data[3].id, data[5].id, String(data[7].id)];
+      list.setSelectedKeys(ids);
+      log('sel-output', 'EXT-SEL', `外部设置 ${ids.length} 条 (含字符串id=${typeof ids[2]}) → 类型兼容`);
+    },
+    setExternalFocus() {
+      if (!list || data.length < 20) return;
+      const strId = String(data[15].id);
+      const ok = list.setFocusedItem(strId);
+      log('sel-output', 'EXT-FOCUS', `外部设置焦点 id=str"${strId}" (类型${typeof strId}) → ${ok ? '成功' : '失败'}`);
     }
   };
 })();
@@ -402,6 +430,7 @@ const grpDemo = (() => {
   }
   function init() {
     const data = initial();
+    const firstThree = data.slice(0, 3).map(g => g.groupKey);
     list = new VirtualList(document.getElementById('grp-list'), {
       itemHeight: 58,
       estimatedHeaderHeight: 40,
@@ -409,12 +438,13 @@ const grpDemo = (() => {
       selectionMode: 'multiple',
       getItemKey: it => it.id,
       getGroupKey: g => g.groupKey,
+      defaultCollapsedGroups: firstThree,
       renderItem: renderItem,
       renderGroupHeader: renderHeader,
       renderStickyHeader: renderSticky,
       onStickyGroupChange: g => {
         refreshStats();
-        log('grp-output', 'STICKY', g ? `吸顶 → ${g.key}` : '无吸顶');
+        log('grp-output', 'STICKY', g ? `吸顶 → ${g.key} (${g.collapsed ? '折叠' : '展开'})` : '无吸顶');
       },
       onGroupCollapseChange: (k, c) => {
         refreshStats();
@@ -456,7 +486,36 @@ const grpDemo = (() => {
       log('grp-output', 'MIXED', `追加 2 个已有分组合并 + 1 个新分组`);
     },
     collapseAll() { list.data.forEach(g => list.setGroupCollapsed(list.options.getGroupKey(g), true)); refreshStats(); log('grp-output', 'COLLAPSE', `全部折叠`); },
-    expandAll() { list.data.forEach(g => list.setGroupCollapsed(list.options.getGroupKey(g), false)); refreshStats(); log('grp-output', 'EXPAND', `全部展开`); }
+    expandAll() { list.data.forEach(g => list.setGroupCollapsed(list.options.getGroupKey(g), false)); refreshStats(); log('grp-output', 'EXPAND', `全部展开`); },
+    expandOnly1() {
+      const key = list.data[0] ? list.options.getGroupKey(list.data[0]) : null;
+      if (!key) return;
+      list.expandOnlyGroup(key);
+      refreshStats();
+      log('grp-output', 'ONLY', `只展开 ${key},其他分组全部折叠`);
+    },
+    expandOdd() {
+      const odds = list.data.filter((_, i) => i % 2 === 0).map(g => list.options.getGroupKey(g));
+      list.setExpandedGroups(odds, { mode: 'replace' });
+      refreshStats();
+      log('grp-output', 'BATCH', `批量展开 ${odds.length} 个奇数序分组,其他折叠`);
+    },
+    doFilter() {
+      const kw = (document.getElementById('grp-filter').value || '').trim();
+      if (!kw) return;
+      list.filterGroups(g => {
+        const k = String(list.options.getGroupKey(g) || '');
+        const title = String(g.group || '');
+        return k.indexOf(kw) >= 0 || title.indexOf(kw) >= 0;
+      });
+      refreshStats();
+      log('grp-output', 'FILTER', `按关键字 "${kw}" 过滤,原选中/折叠状态保留在内部`);
+    },
+    clearFilter() {
+      list.clearGroupFilter();
+      refreshStats();
+      log('grp-output', 'FILTER', `清除过滤,恢复原数据,选中/折叠状态还原`);
+    }
   };
 })();
 
